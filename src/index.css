@@ -1,0 +1,18 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* 默认主题色 */
+  --bg-main: #1e1e2e;
+  --bg-sidebar: rgba(0, 0, 0, 0.4);
+  --text-main: #d4d4d4;
+  --accent-color: #22d3ee; /* 青色 */
+  --terminal-bg: #181818;
+}
+body {
+  background-color: #181818; /* 极客深灰底色 */
+  color: #ffffff;
+  margin: 0;
+  overflow: hidden;
+}

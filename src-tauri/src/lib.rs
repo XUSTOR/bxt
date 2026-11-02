@@ -5,6 +5,9 @@ use tauri::{AppHandle, Emitter, State, Manager};
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use serde::Serialize;
 
+mod ai;
+mod secret;
+
 struct PtyHandles {
     writer: Box<dyn Write + Send>,
     master: Box<dyn portable_pty::MasterPty + Send>,
@@ -20,7 +23,12 @@ struct PtyOutputPayload {
 }
 
 #[tauri::command]
-fn pty_start(app: AppHandle, state: State<'_, PtyState>, id: String) -> Result<(), String> {
+fn pty_start(
+    app: AppHandle,
+    state: State<'_, PtyState>,
+    id: String,
+    no_banner: Option<bool>,
+) -> Result<(), String> {
     let mut map = state.0.lock().map_err(|e| e.to_string())?;
     if map.contains_key(&id) {
         return Ok(()); 
@@ -31,7 +39,12 @@ fn pty_start(app: AppHandle, state: State<'_, PtyState>, id: String) -> Result<(
         rows: 24, cols: 80, pixel_width: 0, pixel_height: 0,
     }).map_err(|e| e.to_string())?;
 
-    let cmd = CommandBuilder::new("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe");
+    let mut cmd =
+        CommandBuilder::new("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe");
+    // -NoLogo：跳过 "Windows PowerShell / 版权所有 / 安装最新版" 那段启动横幅
+    if no_banner.unwrap_or(false) {
+        cmd.arg("-NoLogo");
+    }
     let mut child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
 
     drop(pair.slave);
@@ -99,14 +112,34 @@ fn pty_kill(state: State<'_, PtyState>, id: String) -> Result<(), String> {
     Ok(())
 }
 
+/// 读系统剪贴板纯文本（右键粘贴用）。
+/// 前端拿不到 clipboard-read 权限，走 Rust 侧最稳。
+#[tauri::command]
+fn clipboard_read_text() -> Result<String, String> {
+    let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
+    clipboard.get_text().map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             app.manage(PtyState(Mutex::new(HashMap::new())));
+            app.manage(ai::AiState::load(app.handle()));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![pty_start, pty_write, pty_resize, pty_kill])
+        .invoke_handler(tauri::generate_handler![
+            pty_start,
+            pty_write,
+            pty_resize,
+            pty_kill,
+            clipboard_read_text,
+            ai::ai_get_config,
+            ai::ai_set_config,
+            ai::ai_chat,
+            ai::ai_cancel,
+            ai::ai_test
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

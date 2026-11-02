@@ -1,12 +1,15 @@
 import React, { useState, useEffect, useRef } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import TerminalComponent from "./TerminalComponent";
-import type { TerminalHandle } from "./TerminalComponent";
+import type { TerminalHandle, TerminalRound } from "./TerminalComponent";
 import AiPanel from "./components/AiPanel";
 import CommandPalette from "./components/CommandPalette";
 import SettingsModal from "./components/SettingsModal";
+import PrivacyNotice from "./components/PrivacyNotice";
 import { useTheme } from "./hooks/useTheme";
 import { LanguageProvider, useLanguage } from "./contexts/LanguageContext";
 import { useSnippets } from "./hooks/useSnippets";
+import { hasAckedPrivacy } from "./lib/settings";
 
 interface Tab {
   id: string;
@@ -16,6 +19,8 @@ function AppContent() {
   const [isAiOpen, setIsAiOpen] = useState(false);
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  // 首次启动（或隐私说明升版后）弹一次，勾了"不再提示"就不再出现
+  const [showPrivacy, setShowPrivacy] = useState(() => !hasAckedPrivacy());
 
   const { t } = useLanguage();
   const { snippets, recordCommand } = useSnippets();
@@ -23,27 +28,33 @@ function AppContent() {
   const [activeTabId, setActiveTabId] = useState("term-1");
 
   const terminalRefs = useRef<Map<string, TerminalHandle>>(new Map());
+  // 终端轮次（命令 + 输出），按标签分开存：不同标签的上下文不能串
+  const [roundsByTab, setRoundsByTab] = useState<Record<string, TerminalRound[]>>(
+    {},
+  );
+  const rounds = roundsByTab[activeTabId] ?? [];
   const theme = useTheme();
 
   useEffect(() => {
-    let lastCtrlTime = 0;
+    // 双击 Ctrl 的判定只用 keyup：一次"按一下"必然产生且只产生一次 keyup，
+    // 而长按产生的自动重复只有 keydown、没有 keyup，天然不会被误判成连击。
+    let lastCtrlTap = 0;
+
+    const isCtrlKey = (e: KeyboardEvent) =>
+      e.key === "Control" ||
+      e.code === "ControlLeft" ||
+      e.code === "ControlRight";
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      // 👇 核心逻辑：双击 Ctrl 切换面板开/关
-      if (e.key === "Control" || e.code === "ControlLeft") {
-        const now = Date.now();
-        if (now - lastCtrlTime < 300) {
-          e.preventDefault();
-          e.stopPropagation();
-          setIsPaletteOpen((prev) => !prev); // 切换状态
-          lastCtrlTime = 0;
-        } else {
-          lastCtrlTime = now;
-        }
-      } else {
-        // 👇 防误触：按了其他键（比如 C），立刻重置计时器，防止按 Ctrl+C 时误触面板
-        lastCtrlTime = 0;
-      }
+      // 👇 长按时系统会以几十毫秒的间隔重复派发 keydown（e.repeat === true）。
+      //    这些重复事件必须全部丢弃，否则面板会被反复开关。
+      if (e.repeat) return;
+
+      // Ctrl 的判定交给 keyup，按下时不做任何事
+      if (isCtrlKey(e)) return;
+
+      // 按了其他键就重置，防止 Ctrl+C / Ctrl+V 被算成一次 Ctrl 点击
+      lastCtrlTap = 0;
 
       // 保留 Ctrl+Shift+A 唤出 AI
       if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "a") {
@@ -51,18 +62,33 @@ function AppContent() {
         e.stopPropagation();
         setIsAiOpen((prev) => !prev);
       }
-      // 保留 Ctrl+K 切换面板
-      if (e.ctrlKey && e.key.toLowerCase() === "k") {
+      // 命令面板：Ctrl+Shift+P（Ctrl+K 已还给 shell）
+      if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "p") {
         e.preventDefault();
         e.stopPropagation();
         setIsPaletteOpen((prev) => !prev);
       }
     };
 
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (!isCtrlKey(e)) return;
+
+      const now = Date.now();
+      if (now - lastCtrlTap < 300) {
+        setIsPaletteOpen((prev) => !prev);
+        lastCtrlTap = 0; // 用掉这次双击，等待下一轮
+      } else {
+        lastCtrlTap = now;
+      }
+    };
+
     // 必须绑定在 document，且使用 capture: true 优先拦截
     document.addEventListener("keydown", handleKeyDown, { capture: true });
-    return () =>
+    document.addEventListener("keyup", handleKeyUp, { capture: true });
+    return () => {
       document.removeEventListener("keydown", handleKeyDown, { capture: true });
+      document.removeEventListener("keyup", handleKeyUp, { capture: true });
+    };
   }, []);
 
   // Ctrl + 滚轮切换 Tab
@@ -92,10 +118,22 @@ function AppContent() {
 
   const closeTab = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
+
+    // 关掉标签就丢掉它那一份轮次，避免新终端"继承"上一个终端的上下文
+    setRoundsByTab((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+
+    // 一并结束这个标签的 PTY 进程，否则会留下孤儿 powershell.exe
+    void invoke("pty_kill", { id }).catch(() => {});
+
     const newTabs = tabs.filter((tab) => tab.id !== id);
     if (newTabs.length === 0) {
       setTabs([{ id: "term-1" }]);
       setActiveTabId("term-1");
+      setRoundsByTab({}); // 全部关掉 = 上下文清零
     } else {
       setTabs(newTabs);
       if (activeTabId === id) setActiveTabId(newTabs[newTabs.length - 1].id);
@@ -123,7 +161,7 @@ function AppContent() {
               <div
                 key={tab.id}
                 onClick={() => setActiveTabId(tab.id)}
-                className={`group relative flex items-center justify-between gap-3 px-3.5 py-1.5 ${roundClass} cursor-pointer min-w-[130px] max-w-[180px] h-full text-xs font-mono transition-all duration-200 border-t border-x ${
+                className={`group relative flex items-center justify-between gap-2 pl-3.5 pr-1.5 py-1.5 ${roundClass} cursor-pointer min-w-[130px] max-w-[180px] h-full text-xs font-mono transition-all duration-200 border-t border-x ${
                   isActive
                     ? "bg-black/80 text-[var(--accent-color)] border-gray-700/50 z-10 border-b-transparent"
                     : "bg-transparent text-gray-500 border-transparent hover:bg-white/5 hover:text-gray-300"
@@ -139,7 +177,7 @@ function AppContent() {
                 </span>
                 <button
                   onClick={(e) => closeTab(e, tab.id)}
-                  className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] transition-all ${
+                  className={`w-5 h-5 rounded-full flex items-center justify-center text-sm leading-none transition-all ${
                     isActive
                       ? "opacity-100 hover:bg-red-500/20 hover:text-red-400"
                       : "opacity-0 group-hover:opacity-100 hover:bg-red-500/20 hover:text-red-400"
@@ -195,6 +233,12 @@ function AppContent() {
                 bgColor={theme.bgColor}
                 fontSize={theme.fontSize}
                 onCommandExecuted={recordCommand}
+                onRoundComplete={(round) =>
+                  setRoundsByTab((prev) => ({
+                    ...prev,
+                    [tab.id]: [...(prev[tab.id] ?? []), round].slice(-50),
+                  }))
+                }
               />
             </div>
           ))}
@@ -228,12 +272,14 @@ function AppContent() {
 
         {/* 底部提示 */}
         <div className="absolute bottom-5 left-16 z-50 pointer-events-none text-[10px] text-gray-600 font-mono tracking-widest">
-          双击 Ctrl 搜索命令 (或 Ctrl+K)
+          {t("shortcutHint")}
         </div>
       </div>
 
       {/* 弹窗挂载 */}
       <CommandPalette
+        // key 随开关变化 → 每次打开都重新挂载，搜索词和选中项自然归零
+        key={isPaletteOpen ? "open" : "closed"}
         isOpen={isPaletteOpen}
         onClose={() => setIsPaletteOpen(false)}
         snippets={snippets}
@@ -255,10 +301,18 @@ function AppContent() {
         setFontSize={theme.setFontSize}
       />
 
+      {showPrivacy && (
+        <PrivacyNotice onClose={() => setShowPrivacy(false)} />
+      )}
+
       <AiPanel
         isAiOpen={isAiOpen}
         closeAi={() => setIsAiOpen(false)}
         themeColor={theme.themeColor}
+        rounds={rounds}
+        onInsert={(text) =>
+          terminalRefs.current.get(activeTabId)?.injectCommand(text)
+        }
       />
     </div>
   );

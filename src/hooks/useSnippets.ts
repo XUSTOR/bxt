@@ -26,15 +26,12 @@ const IGNORE_COMMANDS = [
 
 export function useSnippets() {
   const [snippets, setSnippets] = useState<Snippet[]>(() => {
-    const saved = localStorage.getItem("terminal_snippets");
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        return DEFAULT_SNIPPETS;
-      }
+    try {
+      const saved = localStorage.getItem("terminal_snippets");
+      return saved ? (JSON.parse(saved) as Snippet[]) : DEFAULT_SNIPPETS;
+    } catch {
+      return DEFAULT_SNIPPETS;
     }
-    return DEFAULT_SNIPPETS;
   });
 
   // 当数据改变时，自动持久化到本地
@@ -52,7 +49,7 @@ export function useSnippets() {
 
     setSnippets((prev) => {
       const existingIndex = prev.findIndex((s) => s.cmd === trimmedCmd);
-      let newSnippets = [...prev];
+      const newSnippets = [...prev];
 
       if (existingIndex >= 0) {
         // 如果已经存在，增加次数，更新时间

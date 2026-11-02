@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import type { Snippet } from "../hooks/useSnippets";
+import { useLanguage } from "../contexts/LanguageContext";
 
 interface CommandPaletteProps {
   isOpen: boolean;
@@ -21,14 +22,17 @@ export default function CommandPalette({
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  // 最近一次滚轮时间：滚动后的一小段时间内忽略"悬停选中"，
+  // 否则列表自动滚动时条目从鼠标下滑过，会把选中项改成指针下那一项
+  const lastWheelRef = useRef(0);
+  const { t } = useLanguage();
 
-  // 每次打开时重置搜索状态并自动聚焦
+  // 打开时自动聚焦（搜索词/选中项由 App 侧 key 重挂载重置，见 App.tsx）
   useEffect(() => {
-    if (isOpen) {
-      setQuery("");
-      setSelectedIndex(0);
-      setTimeout(() => inputRef.current?.focus(), 50);
-    }
+    if (!isOpen) return;
+    const timer = setTimeout(() => inputRef.current?.focus(), 50);
+    return () => clearTimeout(timer);
   }, [isOpen]);
 
   // 模糊搜索过滤
@@ -36,32 +40,43 @@ export default function CommandPalette({
     s.cmd.toLowerCase().includes(query.toLowerCase()),
   );
 
-  // 👇 核心修复：将滚轮事件提升到全局 window，防止鼠标不在选项上时无法触发
+  // 滚轮 = 逐项遍历选中项（不是原生滚动）。
+  // 遍历走出可视区时，由下面那个 scrollIntoView 的 effect 自动把列表带下去。
   useEffect(() => {
     if (!isOpen) return;
 
+    let lastTick = 0;
     const handleWheel = (e: WheelEvent) => {
-      // 阻止默认的页面滚动或 xterm 触发
+      // 阻止原生滚动/页面滚动，滚轮只用来遍历选项
       e.preventDefault();
-      e.stopPropagation();
+      lastWheelRef.current = Date.now();
+
+      const now = Date.now();
+      // 触控板一次手势会连发几十个事件，节流一下才会"一项一项"走
+      if (now - lastTick < 60) return;
+      lastTick = now;
 
       if (filteredSnippets.length === 0) return;
 
-      if (e.deltaY > 0) {
-        // 向下滚动
-        setSelectedIndex((prev) =>
-          prev < filteredSnippets.length - 1 ? prev + 1 : prev,
-        );
-      } else if (e.deltaY < 0) {
-        // 向上滚动
-        setSelectedIndex((prev) => (prev > 0 ? prev - 1 : 0));
-      }
+      setSelectedIndex((prev) => {
+        if (e.deltaY > 0) return Math.min(prev + 1, filteredSnippets.length - 1);
+        if (e.deltaY < 0) return Math.max(prev - 1, 0);
+        return prev;
+      });
     };
 
-    // 必须加上 passive: false，否则 preventDefault 会被浏览器忽略
     window.addEventListener("wheel", handleWheel, { passive: false });
     return () => window.removeEventListener("wheel", handleWheel);
   }, [isOpen, filteredSnippets.length]);
+
+  // 选中项变了（滚轮/上下键/悬停）就把它滚进可视区 —— 这就是"遍历到框外时界面自动滚动"
+  useEffect(() => {
+    if (!isOpen) return;
+    const el = listRef.current?.querySelector<HTMLElement>(
+      `[data-index="${selectedIndex}"]`,
+    );
+    el?.scrollIntoView({ block: "nearest" });
+  }, [selectedIndex, isOpen]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Escape") {
@@ -119,7 +134,7 @@ export default function CommandPalette({
             ref={inputRef}
             type="text"
             className="flex-1 bg-transparent text-gray-100 placeholder-gray-500 outline-none text-lg font-mono"
-            placeholder="搜索常用命令..."
+            placeholder={t("searchPlaceholder")}
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);
@@ -130,10 +145,13 @@ export default function CommandPalette({
         </div>
 
         {/* 结果列表 */}
-        <div className="max-h-[350px] overflow-y-auto custom-scrollbar py-2">
+        <div
+          ref={listRef}
+          className="max-h-[350px] overflow-y-auto custom-scrollbar py-2"
+        >
           {filteredSnippets.length === 0 ? (
             <div className="px-4 py-8 text-center text-gray-500 font-mono text-sm">
-              没有找到匹配的命令
+              {t("noResults")}
             </div>
           ) : (
             filteredSnippets.map((s, index) => {
@@ -141,7 +159,12 @@ export default function CommandPalette({
               return (
                 <div
                   key={s.cmd}
-                  onMouseEnter={() => setSelectedIndex(index)}
+                  data-index={index}
+                  onMouseMove={() => {
+                    // 用 mousemove 而不是 mouseenter：列表自动滚动时鼠标没动，不该改选中项
+                    if (Date.now() - lastWheelRef.current < 150) return;
+                    setSelectedIndex(index);
+                  }}
                   onClick={() => {
                     onSelect(s.cmd);
                     onClose();
@@ -159,7 +182,7 @@ export default function CommandPalette({
                     {s.cmd}
                   </div>
                   <div className="text-[10px] text-gray-500 bg-black/40 px-2 py-0.5 rounded shrink-0">
-                    {s.count} 次
+                    {s.count} {t("times")}
                   </div>
                 </div>
               );

@@ -1,129 +1,162 @@
-# BXT — Better Xustor Terminal
+# BXT — Better Xterminal
 
-一个把 AI 放进终端的 Windows 桌面工具：**命令轮次即上下文，答案只填入、不执行**。
-
-基于 Tauri 2 + React 19 + xterm.js + Rust（ConPTY）构建，安装包约 5 MB，不需要 Node、不需要管理员权限。
-
----
-
-## ⚠️ 隐私边界（先看这个）
-
-> **1. 终端内容会离开你的电脑。**
-> 你在 AI 面板里勾选的命令轮次会**原样**发给你自己配置的 AI 端点（DeepSeek / OpenAI / 任意 OpenAI 兼容服务）。本程序**不做脱敏**，也**没有任何自有服务器**做中转 —— 请求由本机直接发往你填写的 `baseUrl`。
-> 因此请自行判断：不要把 `env`、`kubectl get secret -o yaml`、含 token 的命令输出勾进上下文。
->
-> **2. API Key 用 Windows DPAPI 加密后落盘。**
-> 位置：`%APPDATA%\com.xustor.aiterminal.v1\ai-config.json`，字段值是 `dpapi:<base64>` 密文，作用域是「当前 Windows 用户 + 本机」—— 把配置文件拷到别的电脑或别的账户都解不开。Key 不会上传，也不会回传到前端。
->
-> **3. 没有遥测。**
-> 没有崩溃上报、没有使用统计、没有自动更新检查。
+**The model is the co-pilot. You are the pilot.**
+BXT hands the AI exact terminal context and then stops — it never presses Enter for you.
 
 ---
 
-## 特性
+## Why BXT
 
-- **原生终端**：Rust + ConPTY，支持 PowerShell / pwsh，VT 序列、进度条、表格对齐都正常
-- **轮次上下文**：每条命令 + 它的输出自动归为"一轮"，勾选任意几轮作为 AI 的上下文，按标签页隔离，不会串台
-- **只填入不执行**：AI 给出的命令通过 bracketed paste 插入到提示符，**回车由你自己按**
-- **多标签**：每个标签独立 PTY、独立轮次
-- **命令面板**：双击 `Ctrl` 或 `Ctrl+Shift+P`，按使用频次排序的历史命令，滚轮逐项遍历
-- **右键即取**：选中时复制，未选中时粘贴
-- **可调外观**：强调色、终端底色、字号，实时预览
-- **一只幽灵**：关于页里能拖来拖去的小彩蛋
+The terminal is in the middle of an arms race. Agents now write code, run it, read the failure, and try again, all without a human in the loop. It demos beautifully. It also means one hallucination sits a single keystroke away from `git push --force`, `docker system prune`, or `rm -rf` on the wrong path.
 
-## 快捷键
+BXT takes the opposite bet. Not because automation is impossible, but because **the decision to run something belongs to the person who owns the machine.**
 
-| 按键 | 作用 |
+So it does the part models are actually good at — assembling precise context — and leaves the part that requires judgement to you:
+
+- It records what really happened in your shell: the command, its real output, whether it was truncated.
+- It sends only the rounds you tick, nothing else.
+- When the answer contains a command, it **types it at your prompt** — bracketed paste, no trailing newline, no auto-submit.
+- Then it waits, with the cursor blinking.
+
+You read it. You edit it. You decide. Press Enter, or walk away.
+
+That's the whole product thesis: **context can be automated; accountability can't.**
+
+## The four rules that follow
+
+1. **Insert, never execute.** No shell hook, no IPC path that writes `\r` for you. The only way a command runs is your own keystroke.
+2. **Context is opt-in.** BXT never ships your whole buffer to a model. You tick specific rounds; the panel shows exactly how many are selected.
+3. **A round is the unit.** One command plus its output, isolated per tab. This is what makes the context useful — a chat box guessing at your error message cannot beat the actual stack trace.
+4. **No middleman.** Requests go from your machine straight to the endpoint you configured. There is no BXT server, no proxy, no telemetry.
+
+## What BXT is not
+
+- Not an agent — it has no loop, no tool calls, no autonomy.
+- Not a cloud service — there is no backend to trust.
+- Not a wrapper around your shell — it *is* the shell (ConPTY), so nothing changes about how PowerShell behaves.
+
+---
+
+## ⚠️ Privacy first
+
+> **1. Your terminal content leaves this machine.**
+> The rounds you tick in the AI panel are sent **verbatim** to the endpoint you configured (DeepSeek / OpenAI / any OpenAI-compatible service). BXT does **no redaction**, and there is **no server of ours** in the middle — requests go straight from your machine to your `baseUrl`.
+> Use judgement: don't tick output from `env`, `kubectl get secret -o yaml`, or anything carrying tokens.
+>
+> **2. The API key is encrypted with Windows DPAPI before it touches disk.**
+> Location: `%APPDATA%\com.xustor.aiterminal.v1\ai-config.json`; the value is `dpapi:<base64>` ciphertext scoped to *the current Windows user on this machine*. Copy the file to another PC or account and it becomes undecryptable. The key is never uploaded and never returned to the frontend.
+>
+> **3. No telemetry.**
+> No crash reporting, no usage analytics, no update pings.
+
+---
+
+## Features
+
+- **Native terminal** — Rust + ConPTY; escape sequences, progress bars and table alignment behave exactly as in Windows Terminal
+- **Round-based context** — commands and their output become rounds; tick any of them as context, isolated per tab
+- **Tail-trimmed context** — a round longer than 400 lines is cut to its end and flagged `truncated` before it reaches the model, so one runaway build log can't eat the whole window
+- **Multiple tabs** — each with its own PTY and its own round history
+- **Command palette** — double-tap `Ctrl` or `Ctrl+Shift+P`; ranked by real usage, mouse wheel steps through items
+- **Right click** — copies when there's a selection, pastes when there isn't
+- **Theming** — accent colour, terminal background, font size, with a live preview
+- **A ghost** — a draggable easter egg on the About page
+
+## Keybindings
+
+| Keys | Action |
 |---|---|
-| 双击 `Ctrl` / `Ctrl+Shift+P` | 命令面板 |
-| `Ctrl+Shift+A` | AI 面板 |
-| `Ctrl+T` | 新建标签 |
-| `Ctrl+W` | 关闭标签 |
-| `Ctrl+Tab` / `Ctrl+Shift+Tab` | 切换标签 |
-| `Ctrl+Shift+C` | 复制 |
-| 右键 | 有选中=复制，无选中=粘贴 |
+| Double `Ctrl` / `Ctrl+Shift+P` | Command palette |
+| `Ctrl+Shift+A` | AI panel |
+| `Ctrl+T` | New tab |
+| `Ctrl+W` | Close tab |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Switch tab |
+| `Ctrl+Shift+C` | Copy |
+| Right click | Copy if selection, otherwise paste |
 
-`Ctrl+C` / `Ctrl+D` / `Ctrl+Z` / `Ctrl+L` / `Ctrl+R` / `Ctrl+A` / `Ctrl+U` / `Ctrl+W` 全部保持终端原始行为。
+`Ctrl+C` / `Ctrl+D` / `Ctrl+Z` / `Ctrl+L` / `Ctrl+R` / `Ctrl+A` / `Ctrl+U` / `Ctrl+W` keep their original terminal behaviour.
 
-## 安装
+## Install
 
-从 [Releases](https://github.com/xustor/bxt/releases) 下载 `BXT_x.y.z_x64-setup.exe`，双击安装 —— **无需管理员权限**，装进 `%LOCALAPPDATA%\Programs\BXT`，不触发 UAC。
+Download `BXT_x.y.z_x64-setup.exe` from [Releases](https://github.com/xustor/bxt/releases) and double-click — **no administrator rights needed**. It installs per-user into `%LOCALAPPDATA%\Programs\BXT` and does not trigger UAC.
 
-**系统要求**：Windows 10 1809+ / Windows 11（WebView2 运行时系统自带）。
+**Requirements**: Windows 10 1809+ / Windows 11 (WebView2 ships with the OS).
 
-**首次运行**可能看到「Windows 已保护你的电脑」或「打开这些文件可能会对你的计算机有害」—— 这是未签名程序的例行提示，点「更多信息 → 仍要运行」或「确定」即可。
+**On first launch** Windows may show "Windows protected your PC" or "Opening these files might be harmful" — the standard prompt for an unsigned binary. Click **More info → Run anyway**.
 
-### 安装失败怎么办
+### If installation fails
 
-| 现象 | 处理 |
+| Symptom | What to do |
 |---|---|
-| 报 `Error writing temporary file` | 安全软件（火绒 / 360 等）拦截了解压。**右键安装程序 → 以管理员身份运行** |
-| 双击没反应 / 装到一半退出 | 先关闭安全软件的防护，或把安装包加入信任区，再重试 |
-| 启动报 `msedgewebview2.exe 应用程序错误` | 修复 WebView2 运行时：设置 → 应用 → Microsoft Edge WebView2 Runtime → 修改 → 修复 |
+| `Error writing temporary file` | A security suite (Huorong / 360 etc.) blocked extraction. **Right-click the installer → Run as administrator** |
+| Nothing happens / wizard exits halfway | Disable the security suite temporarily, or trust the installer, then retry |
+| `msedgewebview2.exe` application error at startup | Repair the WebView2 runtime: Settings → Apps → Microsoft Edge WebView2 Runtime → Modify → Repair |
 
-> ⚠️ **只有安装程序可以右键"以管理员身份运行"。**
-> 请勿以管理员身份运行 BXT 本体 —— 提权与非提权混用会损坏 WebView2 的用户数据目录，之后普通权限就打不开了。
+> ⚠️ **Only the installer may be run as administrator.**
+> Never run BXT itself as administrator — mixing elevated and non-elevated runs corrupts the WebView2 user data directory, and the app will then refuse to start under a normal account.
 
-### 多个窗口
+### Multiple windows
 
-BXT 是单实例的：再次启动不会开出第二个窗口，而是把已有窗口提到前台。
-（WebView2 的用户数据目录同一时刻只能被一个进程占用，双开会直接崩溃。）
+BXT is single-instance: launching it again focuses the existing window.
+(The WebView2 user data directory can only be held by one process at a time; a second instance would crash.)
 
-## 从源码构建
+## Build from source
 
 ```bash
+# Node 20+, Rust 1.90+, Visual Studio Build Tools (Desktop development with C++)
 npm install
-npx tauri dev        # 开发，热更新
-npx tauri build      # 打包：安装包在 src-tauri/target/release/bundle/nsis/
+npx tauri dev        # development, hot reload
+npx tauri build      # installer lands in src-tauri/target/release/bundle/nsis/
 ```
 
-> 所有 `npm` / `npx` 命令都在仓库根目录执行；`cargo` 命令在 `src-tauri/` 下执行。
+Run `npm` / `npx` from the repository root; run `cargo` inside `src-tauri/`.
 
-想额外出一个免安装的便携 zip（自用或排障时很方便）：
+Want a no-install portable zip as well (handy for yourself or for debugging)?
 
 ```bash
 powershell -ExecutionPolicy Bypass -File scripts\pack-portable.ps1
-# 产物：dist-portable/BXT_x.y.z_portable.zip
+# output: dist-portable/BXT_x.y.z_portable.zip
 ```
 
-## 项目结构
+## Project layout
 
 ```
 src/
-  App.tsx                 标签页 / 快捷键 / 布局
-  TerminalComponent.tsx   xterm 生命周期、PTY 桥接、轮次采集
+  App.tsx                 tabs / shortcuts / layout
+  TerminalComponent.tsx   xterm lifecycle, PTY bridge, round capture
   components/
-    AiPanel.tsx           AI 面板外壳（组合层）
-    ai/                   useAiChat 状态机、上下文选择、消息列表、prompt 纯函数
-    CommandPalette.tsx    命令面板
-    SettingsModal.tsx     设置（外观 / API / 关于）
-    PrivacyNotice.tsx     首次启动的隐私说明
-    Markdown.tsx          手写 Markdown（带"插入终端"按钮）
-    GhostPet.tsx          幽灵彩蛋
-  lib/                    AI 客户端、轮次切片（含单测）、设置、平台判定
+    AiPanel.tsx           AI panel shell (composition only)
+    ai/                   useAiChat state machine, context picker, message list, prompt helpers
+    CommandPalette.tsx    command palette
+    SettingsModal.tsx     settings (appearance / API / about)
+    PrivacyNotice.tsx     first-run privacy notice
+    Markdown.tsx          hand-rolled Markdown (with "insert" buttons)
+    GhostPet.tsx          the ghost easter egg
+  lib/                    AI client, round slicing (unit tested), settings, platform check
 src-tauri/
-  src/lib.rs              PTY 命令、启动失败弹窗、单实例守卫
-  src/ai.rs               AI 配置与 SSE 流式代理（含单测）
-  src/secret.rs           API Key 的 DPAPI 加解密
-scripts/pack-portable.ps1 便携版打包
+  src/lib.rs              PTY commands, startup failure dialog, single-instance guard
+  src/ai.rs               AI config + SSE streaming proxy (unit tested)
+  src/secret.rs           DPAPI encrypt/decrypt for the API key
+scripts/pack-portable.ps1 portable build
 ```
 
-## 测试
+## Tests
 
 ```bash
-npm test                              # 前端：轮次切片纯函数（vitest）
-cd src-tauri && cargo test --lib      # 后端：SSE 解析（cargo test）
+npm test                              # frontend: round slicing (vitest)
+cd src-tauri && cargo test --lib      # backend: SSE parsing (cargo test)
 ```
 
-## 已知取舍
+## Known trade-offs
 
-- **不做脱敏**：终端输出原样发出。这是刻意的产品决定，不是遗漏。
-- **不做多平台**：PTY 走 ConPTY，API 走 DPAPI，都是 Windows 专有。
-- **单实例**：不允许多开 —— WebView2 的用户数据目录同一时刻只能被一个进程占用。
-- **测试只覆盖纯函数**：轮次切片和 SSE 解析。UI 层没有自动化测试。
+- **No redaction** — terminal output is sent as-is. A deliberate product decision, not an oversight.
+- **No auto-execution, ever** — including "convenience" toggles. If you want an agent, this isn't it.
+- **Windows only** — the PTY goes through ConPTY and secrets through DPAPI.
+- **Single instance** — multi-window is not supported; the WebView2 data directory is exclusive.
+- **Tests cover pure functions only** — round slicing and SSE parsing. No UI automation.
 
-## 许可证
+## License
 
 [MIT](LICENSE)
 
-第三方：Tauri (MIT/Apache-2.0)、React (MIT)、xterm.js (MIT)、portable-pty (MIT)、reqwest (MIT/Apache-2.0)。
+Third-party: Tauri (MIT/Apache-2.0), React (MIT), xterm.js (MIT), portable-pty (MIT), reqwest (MIT/Apache-2.0).

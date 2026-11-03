@@ -415,7 +415,7 @@ export default function SettingsModal({
                   BXT
                 </div>
                 <div className="text-[11px] text-gray-500 font-mono mt-1">
-                  Better Xustor Terminal · v0.1.0
+                  Better Xterminal · v0.1.0
                 </div>
                 <div className="text-xs text-gray-400 mt-3 leading-relaxed max-w-[320px]">
                   {t("aboutTagline")}

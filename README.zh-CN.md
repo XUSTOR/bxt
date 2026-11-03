@@ -82,7 +82,7 @@ BXT 反过来。不是因为自动化做不了，而是「这条命令到底跑�
 
 ## 安装
 
-从 [Releases](https://github.com/XUSTOR/bxt/releases) 下载 `BXT_x.y.z_x64-setup.exe`，双击装就行 —— **不需要管理员权限**，装在 `%LOCALAPPDATA%\Programs\BXT`，不会弹 UAC。
+从 [Releases](https://github.com/XUSTOR/bxt/releases) 下载 `BXT_x.y.z_x64-setup.exe`，双击装就行 —— **不需要管理员权限**，装在 `%LOCALAPPDATA%\BXT`，不会弹 UAC。
 
 **系统要求**：Windows 10 1809+ / Windows 11（WebView2 运行时系统自带）。
 
@@ -95,6 +95,8 @@ BXT 反过来。不是因为自动化做不了，而是「这条命令到底跑�
 | 报 `Error writing temporary file` | 安全软件（火绒 / 360 之类）拦了解压。**右键安装程序 → 以管理员身份运行** |
 | 双击没反应，或者装到一半退出 | 先关掉安全软件的防护，或者把安装包加进信任区，再试一次 |
 | 启动时报 `msedgewebview2.exe` 应用程序错误 | 修一下 WebView2 运行时：设置 → 应用 → Microsoft Edge WebView2 Runtime → 修改 → 修复 |
+
+> 这些提示都来自同一个原因：**安装包没有代码签名**，安全软件会额外审查它。上面的办法都能绕过，但真正的根治是给发布物签名 —— 这是当前版本的已知限制。
 
 > ⚠️ **只有安装程序可以右键「以管理员身份运行」。**
 > BXT 本体别这么干 —— 提权和非提权混着跑会把 WebView2 的用户数据目录弄坏，之后普通权限就打不开了。

@@ -80,7 +80,7 @@ That's the whole product thesis: **context can be automated; accountability can'
 
 ## Install
 
-Download `BXT_x.y.z_x64-setup.exe` from [Releases](https://github.com/xustor/bxt/releases) and double-click — **no administrator rights needed**. It installs per-user into `%LOCALAPPDATA%\Programs\BXT` and does not trigger UAC.
+Download `BXT_x.y.z_x64-setup.exe` from [Releases](https://github.com/XUSTOR/bxt/releases) and double-click — **no administrator rights needed**. It installs per-user into `%LOCALAPPDATA%\BXT` and does not trigger UAC.
 
 **Requirements**: Windows 10 1809+ / Windows 11 (WebView2 ships with the OS).
 
@@ -93,6 +93,8 @@ Download `BXT_x.y.z_x64-setup.exe` from [Releases](https://github.com/xustor/bxt
 | `Error writing temporary file` | A security suite (Huorong / 360 etc.) blocked extraction. **Right-click the installer → Run as administrator** |
 | Nothing happens / wizard exits halfway | Disable the security suite temporarily, or trust the installer, then retry |
 | `msedgewebview2.exe` application error at startup | Repair the WebView2 runtime: Settings → Apps → Microsoft Edge WebView2 Runtime → Modify → Repair |
+
+> These prompts all stem from one thing: **the installer is not code-signed**, so security software treats it as untrusted. The workarounds above are reliable, but the only real fix is signing the release — a known limitation of this version.
 
 > ⚠️ **Only the installer may be run as administrator.**
 > Never run BXT itself as administrator — mixing elevated and non-elevated runs corrupts the WebView2 user data directory, and the app will then refuse to start under a normal account.

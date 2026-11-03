@@ -54,7 +54,11 @@ export default function GhostPet({ size = 160 }: { size?: number }) {
   const BLINK_FADE_MS = 120; // 睁眼时的缓动时长
   const CLICK_SRC_1 = "/click1.wav"; // 单击
   const CLICK_SRC_2 = "/click2.wav"; // 双击之后（含双击本身）
-  const DOUBLE_PRESS_MS = 110; // 两次按下间隔小于这个值就算双击
+  // 双击判定窗口。必须覆盖真实双击的间隔：
+  // 按下-松开-再按下大约 150–300ms，Windows 默认双击时间甚至是 500ms。
+  // 之前设成 110ms 时，第二下永远落在窗口外 —— 表现为 click2 从不响起。
+  // 这个值同时是单击出声的延迟，所以不要盲目调大。
+  const DOUBLE_PRESS_MS = 240;
 
   const hostRef = useRef<HTMLDivElement>(null);
   const tiltRef = useRef<SVGGElement>(null);

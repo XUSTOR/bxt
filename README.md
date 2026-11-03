@@ -1,5 +1,7 @@
 # BXT — Better Xterminal
 
+**English** · [简体中文](README.zh-CN.md)
+
 **The model is the co-pilot. You are the pilot.**
 BXT hands the AI exact terminal context and then stops — it never presses Enter for you.
 

@@ -1,15 +1,18 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, lazy, Suspense } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import TerminalComponent from "./TerminalComponent";
 import type { TerminalHandle, TerminalRound } from "./TerminalComponent";
 import AiPanel from "./components/AiPanel";
-import CommandPalette from "./components/CommandPalette";
-import SettingsModal from "./components/SettingsModal";
 import PrivacyNotice from "./components/PrivacyNotice";
 import { useTheme } from "./hooks/useTheme";
 import { LanguageProvider, useLanguage } from "./contexts/LanguageContext";
 import { useSnippets } from "./hooks/useSnippets";
 import { hasAckedPrivacy } from "./lib/settings";
+
+// 首屏不需要的弹窗按需加载：不进主 chunk，启动时少解析几十 KB。
+// 两者在打开前都不渲染，所以懒加载不会造成可见的延迟。
+const CommandPalette = lazy(() => import("./components/CommandPalette"));
+const SettingsModal = lazy(() => import("./components/SettingsModal"));
 
 interface Tab {
   id: string;
@@ -276,30 +279,36 @@ function AppContent() {
         </div>
       </div>
 
-      {/* 弹窗挂载 */}
-      <CommandPalette
-        // key 随开关变化 → 每次打开都重新挂载，搜索词和选中项自然归零
-        key={isPaletteOpen ? "open" : "closed"}
-        isOpen={isPaletteOpen}
-        onClose={() => setIsPaletteOpen(false)}
-        snippets={snippets}
-        onSelect={(cmd) =>
-          terminalRefs.current.get(activeTabId)?.injectCommand(cmd)
-        }
-        themeColor={theme.themeColor}
-        bgColor={theme.bgColor}
-      />
+      {/* 弹窗挂载：只在打开时渲染，配合 lazy 按需加载 */}
+      <Suspense fallback={null}>
+        {isPaletteOpen && (
+          <CommandPalette
+            // 每次打开都重新挂载，搜索词和选中项自然归零
+            key="palette"
+            isOpen={isPaletteOpen}
+            onClose={() => setIsPaletteOpen(false)}
+            snippets={snippets}
+            onSelect={(cmd) =>
+              terminalRefs.current.get(activeTabId)?.injectCommand(cmd)
+            }
+            themeColor={theme.themeColor}
+            bgColor={theme.bgColor}
+          />
+        )}
 
-      <SettingsModal
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-        themeColor={theme.themeColor}
-        setThemeColor={theme.handleThemeChange}
-        bgColor={theme.bgColor}
-        setBgColor={theme.handleBgChange}
-        fontSize={theme.fontSize}
-        setFontSize={theme.setFontSize}
-      />
+        {isSettingsOpen && (
+          <SettingsModal
+            isOpen={isSettingsOpen}
+            onClose={() => setIsSettingsOpen(false)}
+            themeColor={theme.themeColor}
+            setThemeColor={theme.handleThemeChange}
+            bgColor={theme.bgColor}
+            setBgColor={theme.handleBgChange}
+            fontSize={theme.fontSize}
+            setFontSize={theme.setFontSize}
+          />
+        )}
+      </Suspense>
 
       {showPrivacy && (
         <PrivacyNotice onClose={() => setShowPrivacy(false)} />

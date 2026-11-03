@@ -173,11 +173,13 @@ function readInitialLang(): Language {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved === "zh" || saved === "en") return saved;
   } catch {
-    // localStorage 不可用（隐私模式等）时退回默认值
+    // localStorage 不可用（隐私模式等）时退回系统语言
   }
-  // 首次启动（localStorage 里没有记录）默认英文 —— README 与发行说明都以英文为主。
-  // 用户手动切过中文后会被记住，不会每次回来都重置。
-  return "en";
+  // 首次启动：跟随系统语言，中文系统进中文、其余进英文。
+  // 用户在设置里手动切过之后会被记住（localStorage），不会再被系统语言覆盖。
+  const systemLang =
+    typeof navigator !== "undefined" ? navigator.language : "";
+  return systemLang.toLowerCase().startsWith("zh") ? "zh" : "en";
 }
 
 export function LanguageProvider({ children }: { children: ReactNode }) {

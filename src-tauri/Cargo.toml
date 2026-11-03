@@ -1,10 +1,10 @@
 [package]
 name = "app"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
-license = ""
-repository = ""
+description = "BXT — Better Xterminal"
+authors = ["xustor"]
+license = "MIT"
+repository = "https://github.com/XUSTOR/bxt"
 edition = "2024"
 rust-version = "1.90"
 
@@ -44,3 +44,12 @@ windows-sys = { version = "0.61", features = [
     "Win32_Security_Cryptography",
     "Win32_UI_WindowsAndMessaging",
 ] }
+
+# 发布构建：体积优先。10.8 MB → 约 7 MB，冷启动从磁盘读取更少。
+# 代价是编译变慢（LTO + codegen-units=1），只在 release 生效。
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
+panic = "abort"

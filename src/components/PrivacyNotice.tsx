@@ -8,7 +8,7 @@ import { ackPrivacy } from "../lib/settings";
  * 勾选"不再提示"后写 localStorage（带版本号，见 lib/settings.ts）。
  */
 export default function PrivacyNotice({ onClose }: { onClose: () => void }) {
-  const { t } = useLanguage();
+  const { t, lang, setLang } = useLanguage();
   const [remember, setRemember] = useState(true);
 
   const handleClose = () => {
@@ -20,8 +20,26 @@ export default function PrivacyNotice({ onClose }: { onClose: () => void }) {
     <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
       <div className="w-[520px] border border-white/10 rounded-xl shadow-2xl bg-[#1e1e2e] overflow-hidden animate-in zoom-in-95 duration-200">
         <div className="px-6 pt-6 pb-4">
-          <div className="text-base font-semibold text-gray-100">
-            {t("privacyTitle")}
+          <div className="flex items-start justify-between gap-4">
+            <div className="text-base font-semibold text-gray-100">
+              {t("privacyTitle")}
+            </div>
+            {/* 首屏就能换语言：系统语言猜错时不用去翻设置 */}
+            <div className="flex items-center gap-2 shrink-0 pt-0.5">
+              {(["zh", "en"] as const).map((code) => (
+                <button
+                  key={code}
+                  onClick={() => setLang(code)}
+                  className={`text-[11px] px-1.5 py-0.5 rounded transition-colors ${
+                    lang === code
+                      ? "text-[var(--accent-color)]"
+                      : "text-gray-600 hover:text-gray-400"
+                  }`}
+                >
+                  {code === "zh" ? "中文" : "EN"}
+                </button>
+              ))}
+            </div>
           </div>
           <div className="mt-3 text-[13px] leading-relaxed text-gray-400 flex flex-col gap-2.5">
             <p>{t("privacyAiLine")}</p>

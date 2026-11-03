@@ -13,12 +13,12 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Setup Rust
@@ -41,7 +41,7 @@ jobs:
           # 手动触发（workflow_dispatch）时只构建、不发布。
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
           releaseName: "BXT ${{ github.ref_name }}"
-          releaseBody: "见 CHANGELOG。"
+          releaseBody: "See CHANGELOG."
           releaseDraft: true
           prerelease: false
           args: --bundles nsis

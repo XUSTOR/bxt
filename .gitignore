@@ -19,6 +19,9 @@ webview-data/
 .DS_Store
 Thumbs.db
 
+# 音效原始素材（构建用的那份在 public/click.wav）
+sound/
+
 # 日志
 *.log
 npm-debug.log*

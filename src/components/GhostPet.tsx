@@ -48,6 +48,12 @@ export default function GhostPet({ size = 160 }: { size?: number }) {
   const PRESS_HEAD_SCALE = 0.07;
   const PRESS_EYE_SCALE = 0.3;
 
+  // 双击：闭眼 + 播放音效
+  const BLINK_SQUASH = 0.84; // 纵向压到 16%，看起来就是一条横杠
+  const BLINK_WIDEN = 0.32; // 横向顺带拉宽一点
+  const BLINK_FADE_MS = 120; // 睁眼时的缓动时长
+  const CLICK_SRC = "/click.wav";
+
   const hostRef = useRef<HTMLDivElement>(null);
   const tiltRef = useRef<SVGGElement>(null);
   const bodyScaleRef = useRef<SVGGElement>(null);
@@ -67,6 +73,11 @@ export default function GhostPet({ size = 160 }: { size?: number }) {
     let lastPath = 0;
     let nx = 0;
     let ny = 0;
+
+    // 双击时的"闭眼"截止时间（与 rAF 的 t 同一时间轴：performance.now）
+    let closedUntil = 0;
+    // 音效：第一次双击时才创建，避免一进关于页就加载
+    let audio: HTMLAudioElement | null = null;
 
     // 点按状态
     let pressTarget = 0;
@@ -106,6 +117,25 @@ export default function GhostPet({ size = 160 }: { size?: number }) {
         x: (clientX - rect.left - padX) / scale + VB.x,
         y: (clientY - rect.top - padY) / scale + VB.y,
       };
+    };
+
+    // 双击：放一声 click，然后闭眼一小会儿（眼睛压成横杠）
+    const onDoubleClick = () => {
+      if (!audio) {
+        audio = new Audio(CLICK_SRC);
+        audio.volume = 0.7;
+      }
+      audio.currentTime = 0;
+      void audio.play().catch(() => {
+        // 自动播放被拦之类的，静默忽略 —— 闭眼照常发生
+      });
+
+      // 闭眼时长跟音频对齐；拿不到 duration 就退回 600ms
+      const ms =
+        Number.isFinite(audio.duration) && audio.duration > 0
+          ? Math.min(audio.duration * 1000, 1500)
+          : 600;
+      closedUntil = performance.now() + Math.max(400, ms);
     };
 
     const onPointerDown = (e: PointerEvent) => {
@@ -222,6 +252,13 @@ export default function GhostPet({ size = 160 }: { size?: number }) {
       const hRight = clampScale(1 - EYE_SHAPE_K * nx);
       const pressK = 1 - PRESS_EYE_SCALE * pressNow;
 
+      // 双击后闭眼：纵向压成一条横杠，横向稍宽，最后 120ms 缓开
+      const remain = closedUntil - t;
+      const closed =
+        remain <= 0 ? 0 : remain < BLINK_FADE_MS ? remain / BLINK_FADE_MS : 1;
+      const closeK = 1 - BLINK_SQUASH * closed;
+      const widenK = 1 + BLINK_WIDEN * closed;
+
       if (eyeGroupRef.current) {
         eyeGroupRef.current.style.transform =
           `translate(${sx}px, ${sy}px) ` +
@@ -230,8 +267,8 @@ export default function GhostPet({ size = 160 }: { size?: number }) {
       for (let i = 0; i < eyeScaleRefs.current.length; i++) {
         const g = eyeScaleRefs.current[i];
         if (!g) continue;
-        const h = i === 0 ? hLeft : hRight;
-        g.style.transform = `scale(${h}, ${verticalScale})`;
+        const h = (i === 0 ? hLeft : hRight) * widenK;
+        g.style.transform = `scale(${h.toFixed(4)}, ${(verticalScale * closeK).toFixed(4)})`;
       }
 
       // 底部三个触手：随机相位的平滑浮动。
@@ -269,12 +306,14 @@ export default function GhostPet({ size = 160 }: { size?: number }) {
     };
 
     host.addEventListener("pointerdown", onPointerDown);
+    host.addEventListener("dblclick", onDoubleClick);
     window.addEventListener("mousemove", onMouseMove);
     raf = requestAnimationFrame(tick);
 
     return () => {
       cancelAnimationFrame(raf);
       host.removeEventListener("pointerdown", onPointerDown);
+      host.removeEventListener("dblclick", onDoubleClick);
       window.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);

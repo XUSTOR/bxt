@@ -31,7 +31,36 @@ const zh = {
   times: "次",
 
   // 主界面
-  shortcutHint: "双击 Ctrl 搜索命令 (或 Ctrl+Shift+P)",
+  shortcutHint: "双击 {tap} 搜索命令（或 {keys}）",
+  shortcutHintNoKey: "双击 {tap} 搜索命令",
+
+  // 快捷键设置
+  shortcuts: "快捷键",
+  shortcutScopeApp: "应用",
+  shortcutScopeTerminal: "终端内",
+  shortcutUnbound: "未绑定",
+  shortcutRecording: "按下新的组合键…",
+  shortcutReset: "恢复默认",
+  shortcutResetAll: "全部恢复默认",
+  shortcutConflict: "这个组合键已经被「{name}」占用",
+  shortcutNeedModifier: "至少带上一个修饰键（Ctrl / Alt / Shift）",
+  shortcutUnsupported: "这个键没法绑定",
+  shortcutShellWarn: "会抢走终端里的按键",
+  shortcutDoubleTap: "双击手势",
+  shortcutDoubleTapHint: "连按两下这个键打开命令面板（手势固定，只能换键）",
+  shortcutWebviewNote:
+    "终端里已关掉 WebView 的浏览器快捷键（F5 / Ctrl+R / Ctrl+F 等），只保留 Ctrl+Shift+R 重新加载界面。",
+
+  // 动作名（快捷键列表里用）
+  kbPaletteOpen: "打开命令面板",
+  kbAiToggle: "开关 AI 面板",
+  kbSettingsOpen: "打开设置",
+  kbTabNew: "新建标签页",
+  kbTabClose: "关闭当前标签页",
+  kbTabNext: "下一个标签页",
+  kbTabPrev: "上一个标签页",
+  kbTerminalFocus: "聚焦终端",
+  kbTerminalCopy: "复制选中内容",
 
   // 设置面板
   appearance: "外观与主题",
@@ -107,7 +136,35 @@ const en: Record<keyof typeof zh, string> = {
   noResults: "No matching commands",
   times: "times",
 
-  shortcutHint: "Double-tap Ctrl to search (or Ctrl+Shift+P)",
+  shortcutHint: "Double-tap {tap} to search (or {keys})",
+  shortcutHintNoKey: "Double-tap {tap} to search",
+
+  shortcuts: "Shortcuts",
+  shortcutScopeApp: "App",
+  shortcutScopeTerminal: "In terminal",
+  shortcutUnbound: "Not bound",
+  shortcutRecording: "Press a new shortcut…",
+  shortcutReset: "Reset",
+  shortcutResetAll: "Reset all",
+  shortcutConflict: "Already used by “{name}”",
+  shortcutNeedModifier: "Add at least one modifier (Ctrl / Alt / Shift)",
+  shortcutUnsupported: "This key can't be bound",
+  shortcutShellWarn: "Takes this key from the shell",
+  shortcutDoubleTap: "Double-tap gesture",
+  shortcutDoubleTapHint:
+    "Press this key twice to open the palette (the gesture is fixed; only the key changes)",
+  shortcutWebviewNote:
+    "Browser shortcuts are disabled inside the terminal (F5 / Ctrl+R / Ctrl+F …). Only Ctrl+Shift+R still reloads the UI.",
+
+  kbPaletteOpen: "Open command palette",
+  kbAiToggle: "Toggle AI panel",
+  kbSettingsOpen: "Open settings",
+  kbTabNew: "New tab",
+  kbTabClose: "Close current tab",
+  kbTabNext: "Next tab",
+  kbTabPrev: "Previous tab",
+  kbTerminalFocus: "Focus terminal",
+  kbTerminalCopy: "Copy selection",
 
   appearance: "Appearance",
   languageHint: "Switch interface language",

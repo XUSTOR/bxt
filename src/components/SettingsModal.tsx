@@ -5,6 +5,7 @@ import type { Language } from "../contexts/LanguageContext";
 import { getAiConfig, setAiConfig, testAiConnection } from "../lib/ai";
 import { getHideBanner, setHideBanner } from "../lib/settings";
 import GhostPet from "./GhostPet";
+import ShortcutsTab from "./ShortcutsTab";
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -17,7 +18,7 @@ interface SettingsModalProps {
   setFontSize: (val: number) => void;
 }
 
-type Tab = "appearance" | "api" | "about";
+type Tab = "appearance" | "shortcuts" | "api" | "about";
 
 const ROW =
   "flex items-center justify-between p-3.5 bg-black/20 rounded-lg border border-white/5 hover:border-white/10 transition-all";
@@ -155,6 +156,7 @@ export default function SettingsModal({
             SETTINGS
           </div>
           {navButton("appearance", t("appearance"))}
+          {navButton("shortcuts", t("shortcuts"))}
           {navButton("api", t("apiManagement"))}
           {navButton("about", t("aboutTerminal"))}
         </div>
@@ -178,12 +180,16 @@ export default function SettingsModal({
           <h2 className="text-xl font-bold text-gray-100 mb-6">
             {tab === "appearance"
               ? t("appearance")
-              : tab === "api"
-                ? t("apiManagement")
-                : t("aboutTerminal")}
+              : tab === "shortcuts"
+                ? t("shortcuts")
+                : tab === "api"
+                  ? t("apiManagement")
+                  : t("aboutTerminal")}
           </h2>
 
-          {tab === "appearance" ? (
+          {tab === "shortcuts" ? (
+            <ShortcutsTab />
+          ) : tab === "appearance" ? (
             <div className="flex flex-col gap-4 pb-4">
               {/* 语言切换 */}
               <div className={ROW}>

@@ -1,5 +1,13 @@
 /** 终端相关的前端偏好（存 localStorage，不进后端配置） */
 
+import {
+  DEFAULT_GESTURE_KEY,
+  isGestureKey,
+  type BindingId,
+  type BindingOverrides,
+  type GestureKey,
+} from "./keybindings";
+
 export const HIDE_BANNER_KEY = "terminal_hide_banner";
 
 export function getHideBanner(): boolean {
@@ -56,6 +64,58 @@ export function hasAckedPrivacy(): boolean {
 export function ackPrivacy() {
   try {
     localStorage.setItem(PRIVACY_ACK_KEY, "1");
+  } catch {
+    // 忽略写入失败
+  }
+}
+
+/** 快捷键改动：只存"相对默认值的偏差"，没写过的动作自动吃注册表默认值 */
+const KEYBINDINGS_KEY = "keybindings";
+
+export function getKeybindingOverrides(): BindingOverrides {
+  try {
+    const raw = localStorage.getItem(KEYBINDINGS_KEY);
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+
+    // 只收「字符串」和「null」，其余脏数据直接丢掉；
+    // 值的合法性（语法、裸键）由 resolveBindings 再挡一层
+    const out: BindingOverrides = {};
+    for (const [id, value] of Object.entries(parsed)) {
+      if (value === null || typeof value === "string") {
+        out[id as BindingId] = value as string | null;
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+export function saveKeybindingOverrides(overrides: BindingOverrides) {
+  try {
+    localStorage.setItem(KEYBINDINGS_KEY, JSON.stringify(overrides));
+  } catch {
+    // 忽略写入失败
+  }
+}
+
+/** 双击手势里"双击哪个键" */
+const GESTURE_KEY = "gesture_double_tap_key";
+
+export function getGestureKey(): GestureKey {
+  try {
+    const saved = localStorage.getItem(GESTURE_KEY);
+    return isGestureKey(saved) ? saved : DEFAULT_GESTURE_KEY;
+  } catch {
+    return DEFAULT_GESTURE_KEY;
+  }
+}
+
+export function saveGestureKey(key: GestureKey) {
+  try {
+    localStorage.setItem(GESTURE_KEY, key);
   } catch {
     // 忽略写入失败
   }

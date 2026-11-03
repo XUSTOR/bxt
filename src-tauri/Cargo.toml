@@ -44,6 +44,10 @@ windows-sys = { version = "0.61", features = [
     "Win32_Security_Cryptography",
     "Win32_UI_WindowsAndMessaging",
 ] }
+# 关掉 WebView2 自带的浏览器快捷键（F5/Ctrl+R/Ctrl+F…），这些键要留给终端。
+# 版本必须和 wry 依赖的一致，否则 COM 接口类型对不上。
+webview2-com = "0.39"
+windows-core = "0.62"
 
 # 发布构建：体积优先。10.8 MB → 约 7 MB，冷启动从磁盘读取更少。
 # 代价是编译变慢（LTO + codegen-units=1），只在 release 生效。

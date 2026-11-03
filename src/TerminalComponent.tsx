@@ -15,9 +15,16 @@ import {
   sliceRound,
   stripPrompt,
 } from "./lib/round";
+// 点到的格子有没有字（纯函数，可单测）
+import { cellIsBlank, hitTestGrid } from "./lib/hitTest";
+// 组合键解析：终端里查注册表要用同一套规则
+import { eventToCombo } from "./lib/keybindings";
+import { useKeybindings } from "./hooks/useKeybindings";
 
 export interface TerminalHandle {
   injectCommand: (cmd: string) => void;
+  /** 把输入焦点交回终端（命令面板/设置关掉之后用） */
+  focus: () => void;
 }
 
 /** 一轮 = 用户提交一条命令 + 它的全部输出（提示符回来即结束） */
@@ -98,6 +105,13 @@ const TerminalComponent = ({
     tRef.current = t;
   }, [t]);
 
+  // 快捷键注册表：xterm 的自定义键处理要查它（哪些键不许漏进 shell）
+  const kb = useKeybindings();
+  const kbRef = useRef(kb);
+  useEffect(() => {
+    kbRef.current = kb;
+  }, [kb]);
+
   // 注入命令：用 bracketed paste 包装，只填入不执行
   useImperativeHandle(
     ref,
@@ -115,6 +129,14 @@ const TerminalComponent = ({
           console.error(err);
           setStatus("error");
         });
+
+        // 插完把光标交回终端并滚到命令所在行：
+        // 不然焦点还留在命令面板 / AI 面板里，用户得再点一次终端才能接着改这条命令
+        term.scrollToBottom();
+        term.focus();
+      },
+      focus: () => {
+        termInstance.current?.focus();
       },
     }),
     [id],
@@ -148,12 +170,56 @@ const TerminalComponent = ({
     term.open(host);
 
     term.focus();
-    // 点终端任意位置（包括底部的空白区）都回到最底部并聚焦，
-    // 光标直接落在等待输入的那一行，不用自己去滚回来找。
-    host.addEventListener("pointerdown", () => {
+
+    // ============ 点"真空白"才回到底部 ============
+    // 只有点在网格外的留白（底部状态灯那一条、内边距）或者没字的格子上，
+    // 才滚到最底部并把输入焦点交回等待输入的那一行。
+    // 点在字上、或者这一下其实是拖选（按下后挪动过），一律交给 xterm 自己处理 ——
+    // 否则往上翻着挑一段输出准备复制时，手指一按就被拽回提示符行，选不中东西。
+    const isBlankSpot = (x: number, y: number) => {
+      const screen = term.element?.querySelector(".xterm-screen");
+      if (!screen) return true;
+      // 网格尺寸现量：换过字号/DPR 之后这里拿到的都是当前值
+      const rect = screen.getBoundingClientRect();
+      const hit = hitTestGrid(x, y, rect, term.cols, term.rows);
+      if (!hit) return true; // 网格外 → 真空白
+      const buf = term.buffer.active;
+      return cellIsBlank(buf.getLine(buf.viewportY + hit.row), hit.col);
+    };
+
+    let pressAt: { x: number; y: number } | null = null;
+
+    const handlePointerDown = (e: PointerEvent) => {
+      // 只认左键：右键是"复制/粘贴"菜单，中键另有语义
+      pressAt = e.button === 0 ? { x: e.clientX, y: e.clientY } : null;
+    };
+
+    const handlePointerUp = (e: PointerEvent) => {
+      const from = pressAt;
+      pressAt = null;
+      if (!from || e.button !== 0) return;
+      // 按下后挪动过 = 在拖选，绝不插手中途的视口位置
+      if (
+        Math.abs(e.clientX - from.x) > 3 ||
+        Math.abs(e.clientY - from.y) > 3
+      ) {
+        return;
+      }
+      // 松手时已有选中区（双击选词等）说明用户在挑字
+      if (term.hasSelection()) return;
+      if (!isBlankSpot(e.clientX, e.clientY)) return;
+
       term.scrollToBottom();
       term.focus();
-    });
+    };
+
+    const handlePointerCancel = () => {
+      pressAt = null;
+    };
+
+    host.addEventListener("pointerdown", handlePointerDown);
+    host.addEventListener("pointerup", handlePointerUp);
+    host.addEventListener("pointercancel", handlePointerCancel);
 
     // ============ 终端内快捷键 ============
     // 除了应用级快捷键和"复制"，其余组合键一律原样交给 shell：
@@ -194,30 +260,36 @@ const TerminalComponent = ({
     term.attachCustomKeyEventHandler((event) => {
       if (event.type !== "keydown") return true;
 
-      const key = event.key.toLowerCase();
-
-      // 1. 应用级快捷键让路：Ctrl+Shift+P（命令面板）、Ctrl+Shift+A（AI 面板）
-      //    Ctrl+K 已还给 shell —— PSReadLine 的"删除到行尾"恢复可用
-      if (event.ctrlKey && event.shiftKey && (key === "p" || key === "a")) {
-        return false;
+      // 1. 注册表里被占用的组合键一律不往 shell 送：
+      //    应用级的交给 App 的分发器（它在 document capture 阶段就拦下了，
+      //    走到这里只是为了万一没拦住的兜底）；终端级的就地执行。
+      const combo = eventToCombo(event);
+      if (combo) {
+        const bound = kbRef.current.match(combo);
+        if (bound === "terminal.copy") {
+          event.preventDefault();
+          void copySelection();
+          return false;
+        }
+        if (bound) return false;
       }
-      if (!event.ctrlKey) return true;
 
-      // 2. Ctrl+Shift+C：永远当"复制"，不发给 shell
-      if (event.shiftKey && key === "c") {
+      // 2. Ctrl+C：有选中文本就复制；没有就交给 xterm 发 \x03 中断前台进程。
+      //    这条是上下文相关的，不做成可绑定 —— 否则"怎么中断进程"会变得不可预测。
+      //    Ctrl+K 也没有拦：PSReadLine 的"删除到行尾"照常可用。
+      if (
+        event.ctrlKey &&
+        !event.shiftKey &&
+        !event.altKey &&
+        event.key.toLowerCase() === "c" &&
+        term.hasSelection()
+      ) {
         event.preventDefault();
         void copySelection();
         return false;
       }
 
-      // 3. Ctrl+C：有选中文本就复制；没有就交给 xterm 发 \x03 中断前台进程
-      if (key === "c" && term.hasSelection()) {
-        event.preventDefault();
-        void copySelection();
-        return false;
-      }
-
-      // 4. Ctrl+V / Shift+Insert 不拦：浏览器派发原生 paste 事件，xterm 自己写入 PTY
+      // 3. Ctrl+V / Shift+Insert 不拦：浏览器派发原生 paste 事件，xterm 自己写入 PTY
       return true;
     });
 
@@ -424,6 +496,9 @@ const TerminalComponent = ({
       resizeObserver.disconnect();
       clearTimeout(resizeTimeout);
       clearTimeout(settleTimer);
+      host.removeEventListener("pointerdown", handlePointerDown);
+      host.removeEventListener("pointerup", handlePointerUp);
+      host.removeEventListener("pointercancel", handlePointerCancel);
       host.removeEventListener("contextmenu", handleContextMenu);
       openRound?.marker?.dispose();
       term.dispose();

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, lazy, Suspense } from "react";
+import { useState, useEffect, useRef, useCallback, lazy, Suspense } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import TerminalComponent from "./TerminalComponent";
 import type { TerminalHandle, TerminalRound } from "./TerminalComponent";
@@ -8,6 +8,14 @@ import { useTheme } from "./hooks/useTheme";
 import { LanguageProvider, useLanguage } from "./contexts/LanguageContext";
 import { useSnippets } from "./hooks/useSnippets";
 import { hasAckedPrivacy } from "./lib/settings";
+import { useKeybindings } from "./hooks/useKeybindings";
+import {
+  GESTURE_LABELS,
+  eventToCombo,
+  formatCombo,
+  isAppScope,
+} from "./lib/keybindings";
+import type { BindingId } from "./lib/keybindings";
 
 // 首屏不需要的弹窗按需加载：不进主 chunk，启动时少解析几十 KB。
 // 两者在打开前都不渲染，所以懒加载不会造成可见的延迟。
@@ -37,62 +45,156 @@ function AppContent() {
   );
   const rounds = roundsByTab[activeTabId] ?? [];
   const theme = useTheme();
+  const kb = useKeybindings();
 
+  // ---- 标签页操作：按钮和快捷键共用同一份实现 ----
+  const addTab = useCallback(() => {
+    const newId = `term-${Date.now()}`;
+    setTabs((prev) => [...prev, { id: newId }]);
+    setActiveTabId(newId);
+  }, []);
+
+  const cycleTab = useCallback(
+    (step: 1 | -1) => {
+      if (tabs.length < 2) return;
+      const index = tabs.findIndex((tab) => tab.id === activeTabId);
+      if (index < 0) return;
+      setActiveTabId(tabs[(index + step + tabs.length) % tabs.length].id);
+    },
+    [tabs, activeTabId],
+  );
+
+  const closeTab = useCallback(
+    (id: string) => {
+      // 关掉标签就丢掉它那一份轮次，避免新终端"继承"上一个终端的上下文
+      setRoundsByTab((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+
+      // 一并结束这个标签的 PTY 进程，否则会留下孤儿 powershell.exe
+      void invoke("pty_kill", { id }).catch(() => {});
+
+      const newTabs = tabs.filter((tab) => tab.id !== id);
+      if (newTabs.length === 0) {
+        setTabs([{ id: "term-1" }]);
+        setActiveTabId("term-1");
+        setRoundsByTab({}); // 全部关掉 = 上下文清零
+      } else {
+        setTabs(newTabs);
+        if (activeTabId === id) setActiveTabId(newTabs[newTabs.length - 1].id);
+      }
+    },
+    [tabs, activeTabId],
+  );
+
+  // ---- 快捷键分发器（应用级） ----
+  // 必须挂在 document 且 capture: true：终端有焦点时也要先被我们拦下，
+  // 靠 stopPropagation 把组合键挡在 xterm 之外，字符不会漏进 shell。
   useEffect(() => {
-    // 双击 Ctrl 的判定只用 keyup：一次"按一下"必然产生且只产生一次 keyup，
-    // 而长按产生的自动重复只有 keydown、没有 keyup，天然不会被误判成连击。
-    let lastCtrlTap = 0;
+    const runAction = (id: BindingId) => {
+      switch (id) {
+        case "palette.open":
+          setIsPaletteOpen((prev) => !prev);
+          break;
+        case "ai.toggle":
+          setIsAiOpen((prev) => !prev);
+          break;
+        case "settings.open":
+          setIsSettingsOpen(true);
+          break;
+        case "tab.new":
+          addTab();
+          break;
+        case "tab.close":
+          // 只剩一个标签时不真关：否则会当场重建一个空标签，看着像"清屏"
+          if (tabs.length > 1) closeTab(activeTabId);
+          break;
+        case "tab.next":
+          cycleTab(1);
+          break;
+        case "tab.prev":
+          cycleTab(-1);
+          break;
+        case "terminal.focus":
+          terminalRefs.current.get(activeTabId)?.focus();
+          break;
+        default:
+          break;
+      }
+    };
 
-    const isCtrlKey = (e: KeyboardEvent) =>
-      e.key === "Control" ||
-      e.code === "ControlLeft" ||
-      e.code === "ControlRight";
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // 设置页正在录制新键：让路，按什么都不能触发动作
+      if (kb.isCapturing()) return;
+      if (e.repeat || e.isComposing) return;
+
+      const combo = eventToCombo(e);
+      if (!combo) return;
+
+      // 唯一写死的一个：WebView2 的浏览器快捷键在 release 构建里整体关掉了，
+      // 只给"重新加载界面"留个口子（F5 / Ctrl+R 已经不可用了）
+      if (import.meta.env.PROD && combo === "Ctrl+Shift+R") {
+        e.preventDefault();
+        e.stopPropagation();
+        window.location.reload();
+        return;
+      }
+
+      const id = kb.match(combo);
+      // 终端作用域的动作由 TerminalComponent 自己执行（它才知道有没有选中文本）
+      if (!id || !isAppScope(id)) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+      runAction(id);
+    };
+
+    document.addEventListener("keydown", handleKeyDown, { capture: true });
+    return () =>
+      document.removeEventListener("keydown", handleKeyDown, { capture: true });
+  }, [kb, addTab, closeTab, cycleTab, tabs.length, activeTabId]);
+
+  // ---- 双击手势（默认双击 Ctrl）：手势固定，只有"双击哪个键"可配 ----
+  // 判定只用 keyup：一次"按一下"必然产生且只产生一次 keyup，
+  // 而长按产生的自动重复只有 keydown、没有 keyup，天然不会被误判成连击。
+  useEffect(() => {
+    let lastTap = 0;
+
+    const isGestureKey = (e: KeyboardEvent) => e.key === kb.gestureKey;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       // 👇 长按时系统会以几十毫秒的间隔重复派发 keydown（e.repeat === true）。
       //    这些重复事件必须全部丢弃，否则面板会被反复开关。
-      if (e.repeat) return;
+      if (e.repeat || kb.isCapturing()) return;
 
-      // Ctrl 的判定交给 keyup，按下时不做任何事
-      if (isCtrlKey(e)) return;
+      // 手势键的判定交给 keyup，按下时不做任何事
+      if (isGestureKey(e)) return;
 
       // 按了其他键就重置，防止 Ctrl+C / Ctrl+V 被算成一次 Ctrl 点击
-      lastCtrlTap = 0;
-
-      // 保留 Ctrl+Shift+A 唤出 AI
-      if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "a") {
-        e.preventDefault();
-        e.stopPropagation();
-        setIsAiOpen((prev) => !prev);
-      }
-      // 命令面板：Ctrl+Shift+P（Ctrl+K 已还给 shell）
-      if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "p") {
-        e.preventDefault();
-        e.stopPropagation();
-        setIsPaletteOpen((prev) => !prev);
-      }
+      lastTap = 0;
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
-      if (!isCtrlKey(e)) return;
+      if (!isGestureKey(e) || kb.isCapturing()) return;
 
       const now = Date.now();
-      if (now - lastCtrlTap < 300) {
+      if (now - lastTap < 300) {
         setIsPaletteOpen((prev) => !prev);
-        lastCtrlTap = 0; // 用掉这次双击，等待下一轮
+        lastTap = 0; // 用掉这次双击，等待下一轮
       } else {
-        lastCtrlTap = now;
+        lastTap = now;
       }
     };
 
-    // 必须绑定在 document，且使用 capture: true 优先拦截
     document.addEventListener("keydown", handleKeyDown, { capture: true });
     document.addEventListener("keyup", handleKeyUp, { capture: true });
     return () => {
       document.removeEventListener("keydown", handleKeyDown, { capture: true });
       document.removeEventListener("keyup", handleKeyUp, { capture: true });
     };
-  }, []);
+  }, [kb]);
 
   // Ctrl + 滚轮切换 Tab
   useEffect(() => {
@@ -113,35 +215,13 @@ function AppContent() {
     return () => window.removeEventListener("wheel", handleWheel);
   }, [tabs, activeTabId]);
 
-  const addTab = () => {
-    const newId = `term-${Date.now()}`;
-    setTabs([...tabs, { id: newId }]);
-    setActiveTabId(newId);
-  };
-
-  const closeTab = (e: React.MouseEvent, id: string) => {
-    e.stopPropagation();
-
-    // 关掉标签就丢掉它那一份轮次，避免新终端"继承"上一个终端的上下文
-    setRoundsByTab((prev) => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
-
-    // 一并结束这个标签的 PTY 进程，否则会留下孤儿 powershell.exe
-    void invoke("pty_kill", { id }).catch(() => {});
-
-    const newTabs = tabs.filter((tab) => tab.id !== id);
-    if (newTabs.length === 0) {
-      setTabs([{ id: "term-1" }]);
-      setActiveTabId("term-1");
-      setRoundsByTab({}); // 全部关掉 = 上下文清零
-    } else {
-      setTabs(newTabs);
-      if (activeTabId === id) setActiveTabId(newTabs[newTabs.length - 1].id);
-    }
-  };
+  // 底部提示跟着当前绑定走，别写死一个用户可能已经改掉的键
+  const paletteCombo = kb.effective["palette.open"];
+  const hint = paletteCombo
+    ? t("shortcutHint")
+        .replace("{tap}", GESTURE_LABELS[kb.gestureKey])
+        .replace("{keys}", formatCombo(paletteCombo))
+    : t("shortcutHintNoKey").replace("{tap}", GESTURE_LABELS[kb.gestureKey]);
 
   return (
     <div
@@ -179,7 +259,10 @@ function AppContent() {
                   {t("terminal")} {index + 1}
                 </span>
                 <button
-                  onClick={(e) => closeTab(e, tab.id)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    closeTab(tab.id);
+                  }}
                   className={`w-5 h-5 rounded-full flex items-center justify-center text-sm leading-none transition-all ${
                     isActive
                       ? "opacity-100 hover:bg-red-500/20 hover:text-red-400"
@@ -275,7 +358,7 @@ function AppContent() {
 
         {/* 底部提示 */}
         <div className="absolute bottom-5 left-16 z-50 pointer-events-none text-[10px] text-gray-600 font-mono tracking-widest">
-          {t("shortcutHint")}
+          {hint}
         </div>
       </div>
 
@@ -286,7 +369,11 @@ function AppContent() {
             // 每次打开都重新挂载，搜索词和选中项自然归零
             key="palette"
             isOpen={isPaletteOpen}
-            onClose={() => setIsPaletteOpen(false)}
+            onClose={() => {
+              setIsPaletteOpen(false);
+              // 面板一关，焦点就落到 <body> 上了：交回终端，Esc 之后能直接接着打字
+              terminalRefs.current.get(activeTabId)?.focus();
+            }}
             snippets={snippets}
             onSelect={(cmd) =>
               terminalRefs.current.get(activeTabId)?.injectCommand(cmd)

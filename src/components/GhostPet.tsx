@@ -54,7 +54,7 @@ export default function GhostPet({ size = 160 }: { size?: number }) {
   const BLINK_FADE_MS = 120; // 睁眼时的缓动时长
   const CLICK_SRC_1 = "/click1.wav"; // 单击
   const CLICK_SRC_2 = "/click2.wav"; // 双击之后（含双击本身）
-  const DOUBLE_PRESS_MS = 180; // 两次按下间隔小于这个值就算双击
+  const DOUBLE_PRESS_MS = 110; // 两次按下间隔小于这个值就算双击
 
   const hostRef = useRef<HTMLDivElement>(null);
   const tiltRef = useRef<SVGGElement>(null);

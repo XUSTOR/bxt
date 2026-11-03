@@ -22,6 +22,56 @@ struct PtyOutputPayload {
     data: String,
 }
 
+/// 从 carry 头部切出可以安全解码的完整 UTF-8 前缀。
+///
+/// 关键点：**绝不能把不完整的多字节字符送出去**。
+/// ConPTY 一次 read 可能正好停在汉字（3 字节）中间，那半截必须留在 carry 里
+/// 等下一块拼齐，否则前端会看到 `��`（U+FFFD 替换符）。
+#[cfg_attr(test, allow(dead_code))]
+fn take_utf8_prefix(carry: &mut Vec<u8>) -> Option<String> {
+    match std::str::from_utf8(carry) {
+        Ok(_) => {
+            if carry.is_empty() {
+                return None;
+            }
+            let text = String::from_utf8_lossy(carry).to_string();
+            carry.clear();
+            Some(text)
+        }
+        Err(e) => {
+            let valid = e.valid_up_to();
+            if valid > 0 {
+                // 只送合法前缀，尾巴留给下一块
+                let text = String::from_utf8_lossy(&carry[..valid]).to_string();
+                carry.drain(..valid);
+                Some(text)
+            } else if let Some(bad) = e.error_len() {
+                // 开头就是真正的非法字节（不是被截断的前缀）：
+                // 丢掉它，否则 carry 会永远卡在第一个字节上
+                carry.drain(..bad);
+                None
+            } else {
+                // 只读到半个字符，等下一块
+                None
+            }
+        }
+    }
+}
+
+/// 把一段已解码的文本发给前端（空串不发，省一次 IPC）
+fn emit_output(app: &AppHandle, id: &str, text: String) {
+    if text.is_empty() {
+        return;
+    }
+    let _ = app.emit(
+        "pty-output",
+        PtyOutputPayload {
+            id: id.to_string(),
+            data: text,
+        },
+    );
+}
+
 #[tauri::command]
 fn pty_start(
     app: AppHandle,
@@ -57,23 +107,16 @@ fn pty_start(
 
     std::thread::spawn(move || {
         let mut buf = [0u8; 1024];
-        let mut carry: Vec<u8> = Vec::new(); 
+        // 未被解码的尾巴。ConPTY 吐的是 UTF-8，一次 read 很可能把某个
+        // 汉字（3 字节）从中间切断，半截必须留到下一块再拼。
+        let mut carry: Vec<u8> = Vec::new();
 
         loop {
             match reader.read(&mut buf) {
                 Ok(n) if n > 0 => {
                     carry.extend_from_slice(&buf[..n]);
-                    let cut = match std::str::from_utf8(&carry) {
-                        Ok(_) => carry.len(),
-                        Err(e) => carry.len() - e.error_len().unwrap_or(0),
-                    };
-                    
-                    let text = String::from_utf8_lossy(&carry[..cut]).to_string();
-                    carry.drain(..cut);
-
-                    if !text.is_empty() {
-                        let payload = PtyOutputPayload { id: thread_id.clone(), data: text };
-                        let _ = app_handle.emit("pty-output", payload);
+                    if let Some(text) = take_utf8_prefix(&mut carry) {
+                        emit_output(&app_handle, &thread_id, text);
                     }
                 }
                 _ => break,
@@ -221,5 +264,49 @@ pub fn run() {
             "BXT 启动失败：\n\n{err}\n\n详细信息已写入：\n{}",
             log_path.display()
         ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::take_utf8_prefix;
+
+    #[test]
+    fn split_multibyte_char_is_not_emitted_halfway() {
+        // 「本」= E6 9C AC。模拟一次 read 正好停在 2 字节处。
+        let full = "本地连接".as_bytes().to_vec();
+        let mut carry = full[..2].to_vec();
+
+        // 半截字符不能产出任何东西 —— 产出就意味着前端会看到 `��`
+        assert_eq!(take_utf8_prefix(&mut carry), None);
+
+        // 剩下两字节到齐后，应当一次性解出完整字符串
+        carry.extend_from_slice(&full[2..]);
+        assert_eq!(take_utf8_prefix(&mut carry).as_deref(), Some("本地连接"));
+        assert!(carry.is_empty());
+    }
+
+    #[test]
+    fn complete_chunk_passes_through() {
+        let mut carry = "PS C:\\> dir".as_bytes().to_vec();
+        assert_eq!(
+            take_utf8_prefix(&mut carry).as_deref(),
+            Some("PS C:\\> dir")
+        );
+        assert!(carry.is_empty());
+    }
+
+    #[test]
+    fn invalid_byte_is_dropped_without_stalling() {
+        // 0xFF 不是合法的 UTF-8 起始字节：必须丢掉，否则 carry 永远卡住
+        let mut carry = vec![0xFF, b'a'];
+        assert_eq!(take_utf8_prefix(&mut carry), None);
+        assert_eq!(take_utf8_prefix(&mut carry).as_deref(), Some("a"));
+    }
+
+    #[test]
+    fn empty_carry_yields_nothing() {
+        let mut carry = Vec::new();
+        assert_eq!(take_utf8_prefix(&mut carry), None);
     }
 }

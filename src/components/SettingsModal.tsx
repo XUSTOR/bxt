@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { getVersion } from "@tauri-apps/api/app";
 import { useLanguage } from "../contexts/LanguageContext";
 import type { Language } from "../contexts/LanguageContext";
 import { getAiConfig, setAiConfig, testAiConnection } from "../lib/ai";
@@ -38,6 +39,14 @@ export default function SettingsModal({
   const { lang, setLang, t } = useLanguage();
   const [tab, setTab] = useState<Tab>("appearance");
   const [hideBanner, setHideBannerState] = useState<boolean>(getHideBanner);
+  // 版本号直接从 tauri.conf.json 读，避免每次发版都要回来改这个字面量
+  const [version, setVersion] = useState("");
+
+  useEffect(() => {
+    getVersion()
+      .then(setVersion)
+      .catch(() => setVersion(""));
+  }, []);
 
   // ---- API 管理表单 ----
   const [baseUrl, setBaseUrl] = useState("");
@@ -415,7 +424,7 @@ export default function SettingsModal({
                   BXT
                 </div>
                 <div className="text-[11px] text-gray-500 font-mono mt-1">
-                  Better Xterminal · v0.1.0
+                  Better Xterminal{version ? ` · v${version}` : ""}
                 </div>
                 <div className="text-xs text-gray-400 mt-3 leading-relaxed max-w-[320px]">
                   {t("aboutTagline")}

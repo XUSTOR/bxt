@@ -260,7 +260,10 @@ fn try_self_heal(detail: &str) -> bool {
         return false;
     }
 
-    // 重新拉起自己，带上"已经自愈过"的标记
+    // 重新拉起自己，带上"已经自愈过"的标记。
+    // 等一小会儿再拉起：刚改名的目录可能还被上一个 WebView2 浏览器进程占着，
+    // 立刻启动会撞出 0x8000FFFF（灾难性故障）。
+    std::thread::sleep(std::time::Duration::from_millis(500));
     let Ok(exe) = std::env::current_exe() else {
         return false;
     };
@@ -275,6 +278,24 @@ fn try_self_heal(detail: &str) -> bool {
     true
 }
 
+/// 写崩溃日志：先试 %TEMP%，不行退到 exe 同级目录。
+/// 返回实际写成功的路径 —— 弹窗里只写真实存在的那个，免得指向一个空文件。
+fn write_crash_log(detail: &str) -> Option<std::path::PathBuf> {
+    let name = "bxt-crash.log";
+    let mut candidates = vec![std::env::temp_dir().join(name)];
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join(name));
+        }
+    }
+    for path in candidates {
+        if std::fs::write(&path, detail).is_ok() {
+            return Some(path);
+        }
+    }
+    None
+}
+
 /// release 版没有控制台，启动阶段的 panic 完全不可见（表现就是"闪一下就没了"）。
 /// 这里接住所有 panic：能自愈的先自愈，否则写日志 + 弹窗。
 fn install_panic_hook() {
@@ -286,13 +307,11 @@ fn install_panic_hook() {
             std::process::exit(0);
         }
 
-        let log_path = std::env::temp_dir().join("bxt-crash.log");
-        let _ = std::fs::write(&log_path, format!("{detail}\n\n{info:?}\n"));
-        report_fatal(&format!(
-            "{}\n\n详细信息已写入：\n{}",
-            friendly_panic(&detail),
-            log_path.display()
-        ));
+        let log_hint = match write_crash_log(&format!("{detail}\n\n{info:?}\n")) {
+            Some(path) => format!("\n\n详细信息已写入：\n{}", path.display()),
+            None => "\n\n（崩溃日志写入失败，上面就是全部信息）".to_string(),
+        };
+        report_fatal(&format!("{}{log_hint}", friendly_panic(&detail)));
     }));
 }
 

@@ -209,13 +209,17 @@ fn is_busy_error(detail: &str) -> bool {
 }
 
 /// WebView2 用户数据目录（Tauri 默认位置：`app_local_data_dir()/EBWebView`）。
+/// debug 版跑在 `$LOCALDATA/BXT-dev` 下，所以 profile 也跟着走。
 fn webview_profile_dir() -> Option<std::path::PathBuf> {
     let local = std::env::var_os("LOCALAPPDATA")?;
-    Some(
-        std::path::PathBuf::from(local)
+    let local = std::path::PathBuf::from(local);
+    Some(if cfg!(debug_assertions) {
+        local.join("BXT-dev").join("EBWebView")
+    } else {
+        local
             .join("com.xustor.aiterminal.v1")
-            .join("EBWebView"),
-    )
+            .join("EBWebView")
+    })
 }
 
 /// 遇到 ERROR_BUSY 时自愈：把坏掉的 profile 改名，然后重新拉起自己。
@@ -318,17 +322,38 @@ fn install_panic_hook() {
 pub fn run() {
     install_panic_hook();
 
-    let result = tauri::Builder::default()
-        // 必须最先注册：WebView2 的 profile 是单实例独占的，
-        // 第二个进程去建 webview 会直接失败（ERROR_BUSY / 浏览器进程崩溃）。
-        // 这里把"第二次启动"变成"聚焦已有窗口"。
-        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+    // 开发构建要能和安装版同时开：这样你可以在 BXT 自己的终端里跑 `tauri dev`，
+    // 用 BXT 调试 BXT。做法是给 debug 版一份独立的 WebView2 数据目录，
+    // 否则两个实例会抢同一个 profile（ERROR_BUSY）。
+    // release 版保持单实例 + 共享 profile —— 普通用户双击两次不该开出两个窗口。
+    let is_dev = cfg!(debug_assertions);
+    let mut context = tauri::generate_context!();
+    if is_dev {
+        context.config_mut().app.app_directories_override = Some(
+            tauri::utils::config::AppDirectoriesOverride::Directories(
+                tauri::utils::config::AppDirectoryOverrides {
+                    local_data: Some("$LOCALDATA/BXT-dev".into()),
+                    ..Default::default()
+                },
+            ),
+        );
+    }
+
+    let mut builder = tauri::Builder::default();
+
+    if !is_dev {
+        // WebView2 的 profile 是单实例独占的，第二个进程建 webview 会直接失败
+        // （ERROR_BUSY / 浏览器进程崩溃）。这里把"第二次启动"变成"聚焦已有窗口"。
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.unminimize();
                 let _ = window.show();
                 let _ = window.set_focus();
             }
-        }))
+        }));
+    }
+
+    let result = builder
         .setup(|app| {
             app.manage(PtyState(Mutex::new(HashMap::new())));
             app.manage(ai::AiState::load(app.handle()));
@@ -346,7 +371,7 @@ pub fn run() {
             ai::ai_cancel,
             ai::ai_test
         ])
-        .run(tauri::generate_context!());
+        .run(context);
 
     if let Err(err) = result {
         // 日志放在 %TEMP%，那里一定可写；弹窗里给用户路径

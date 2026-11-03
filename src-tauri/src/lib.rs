@@ -208,8 +208,7 @@ fn is_busy_error(detail: &str) -> bool {
     detail.contains("0x800700AA") || detail.contains("ERROR_BUSY")
 }
 
-/// WebView2 的用户数据目录（与 tauri.conf.json 的 identifier 对应）。
-/// 注意：改动 identifier 时这里也要同步改。
+/// WebView2 用户数据目录（Tauri 默认位置：`app_local_data_dir()/EBWebView`）。
 fn webview_profile_dir() -> Option<std::path::PathBuf> {
     let local = std::env::var_os("LOCALAPPDATA")?;
     Some(

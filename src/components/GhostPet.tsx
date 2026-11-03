@@ -48,11 +48,13 @@ export default function GhostPet({ size = 160 }: { size?: number }) {
   const PRESS_HEAD_SCALE = 0.07;
   const PRESS_EYE_SCALE = 0.3;
 
-  // 双击：闭眼 + 播放音效
+  // 双击：闭眼 + 换音效
   const BLINK_SQUASH = 0.84; // 纵向压到 16%，看起来就是一条横杠
   const BLINK_WIDEN = 0.32; // 横向顺带拉宽一点
   const BLINK_FADE_MS = 120; // 睁眼时的缓动时长
-  const CLICK_SRC = "/click.wav";
+  const CLICK_SRC_1 = "/click1.wav"; // 单击
+  const CLICK_SRC_2 = "/click2.wav"; // 双击之后（含双击本身）
+  const DOUBLE_PRESS_MS = 180; // 两次按下间隔小于这个值就算双击
 
   const hostRef = useRef<HTMLDivElement>(null);
   const tiltRef = useRef<SVGGElement>(null);
@@ -76,8 +78,26 @@ export default function GhostPet({ size = 160 }: { size?: number }) {
 
     // 双击时的"闭眼"截止时间（与 rAF 的 t 同一时间轴：performance.now）
     let closedUntil = 0;
-    // 音效：第一次双击时才创建，避免一进关于页就加载
-    let audio: HTMLAudioElement | null = null;
+
+    // ---- 音效 ----
+    // 单击 → click1；双击 → click2；双击之后的所有点击继续用 click2。
+    // 音频元素懒加载：第一次真的要出声时才创建。
+    let audio1: HTMLAudioElement | null = null;
+    let audio2: HTMLAudioElement | null = null;
+    let armed = false; // 双击过之后置真：此后一律 click2
+    let pendingSingle: number | undefined; // 等待确认"不是双击"的计时器
+
+    const playSound = (which: 1 | 2) => {
+      const el =
+        which === 1
+          ? (audio1 ??= new Audio(CLICK_SRC_1))
+          : (audio2 ??= new Audio(CLICK_SRC_2));
+      el.volume = 0.7;
+      el.currentTime = 0;
+      void el.play().catch(() => {
+        // 自动播放被拦之类的，静默忽略 —— 闭眼等反应照常发生
+      });
+    };
 
     // 点按状态
     let pressTarget = 0;
@@ -119,26 +139,42 @@ export default function GhostPet({ size = 160 }: { size?: number }) {
       };
     };
 
-    // 双击：放一声 click，然后闭眼一小会儿（眼睛压成横杠）
+    // 双击：眼睛压成横杠一小会儿
     const onDoubleClick = () => {
-      if (!audio) {
-        audio = new Audio(CLICK_SRC);
-        audio.volume = 0.7;
-      }
-      audio.currentTime = 0;
-      void audio.play().catch(() => {
-        // 自动播放被拦之类的，静默忽略 —— 闭眼照常发生
-      });
-
-      // 闭眼时长跟音频对齐；拿不到 duration 就退回 600ms
+      // 闭眼时长跟双击音效对齐；拿不到 duration 就退回 600ms
       const ms =
-        Number.isFinite(audio.duration) && audio.duration > 0
-          ? Math.min(audio.duration * 1000, 1500)
+        Number.isFinite(audio2?.duration) && (audio2?.duration ?? 0) > 0
+          ? Math.min((audio2?.duration ?? 0) * 1000, 1500)
           : 600;
       closedUntil = performance.now() + Math.max(400, ms);
     };
 
+    // 按下时的音效判定：
+    //   已 armed        → 直接 click2
+    //   180ms 内第二次按 → 算双击，改放 click2 并进入 armed
+    //   其余            → 等 180ms，确认不是双击再放 click1
+    // 之所以延迟一下，是因为"双击"必然先产生一次按下，立刻放 click1 会和
+    // click2 叠在一起，听起来像两声。
+    const triggerPressSound = () => {
+      if (armed) {
+        playSound(2);
+        return;
+      }
+      if (pendingSingle !== undefined) {
+        window.clearTimeout(pendingSingle);
+        pendingSingle = undefined;
+        armed = true;
+        playSound(2);
+        return;
+      }
+      pendingSingle = window.setTimeout(() => {
+        pendingSingle = undefined;
+        playSound(1);
+      }, DOUBLE_PRESS_MS);
+    };
+
     const onPointerDown = (e: PointerEvent) => {
+      triggerPressSound();
       const p = toViewBox(e.clientX, e.clientY);
 
       // 点脑袋 → 额外触发挤压；其余位置只有拖动
@@ -312,6 +348,7 @@ export default function GhostPet({ size = 160 }: { size?: number }) {
 
     return () => {
       cancelAnimationFrame(raf);
+      if (pendingSingle !== undefined) window.clearTimeout(pendingSingle);
       host.removeEventListener("pointerdown", onPointerDown);
       host.removeEventListener("dblclick", onDoubleClick);
       window.removeEventListener("mousemove", onMouseMove);

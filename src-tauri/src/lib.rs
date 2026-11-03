@@ -189,8 +189,8 @@ fn report_fatal(message: &str) {
 /// 把已知的启动失败翻译成用户能照着做的步骤。
 fn friendly_panic(detail: &str) -> String {
     // 0x800700AA = ERROR_BUSY：WebView2 数据目录异常/被占用。
-    // 最常见的原因是提权运行过，profile 里混进了非提权上下文写不动的文件。
-    if detail.contains("0x800700AA") || detail.contains("ERROR_BUSY") {
+    // 最常见的原因是提权运行过、或被强杀后 profile 进入 WebView2 不认的状态。
+    if is_busy_error(detail) {
         "BXT 无法启动：WebView2 数据目录异常。\n\n\
 请依次尝试：\n\
 1) 关闭所有 BXT 窗口，并在任务管理器里结束所有 msedgewebview2.exe\n\
@@ -204,11 +204,88 @@ fn friendly_panic(detail: &str) -> String {
     }
 }
 
+fn is_busy_error(detail: &str) -> bool {
+    detail.contains("0x800700AA") || detail.contains("ERROR_BUSY")
+}
+
+/// WebView2 的用户数据目录（与 tauri.conf.json 的 identifier 对应）。
+/// 注意：改动 identifier 时这里也要同步改。
+fn webview_profile_dir() -> Option<std::path::PathBuf> {
+    let local = std::env::var_os("LOCALAPPDATA")?;
+    Some(
+        std::path::PathBuf::from(local)
+            .join("com.xustor.aiterminal.v1")
+            .join("EBWebView"),
+    )
+}
+
+/// 遇到 ERROR_BUSY 时自愈：把坏掉的 profile 改名，然后重新拉起自己。
+///
+/// 用环境变量 BXT_HEALED 保证只自愈一次 —— 否则会无限重启。
+/// 返回值表示"已经处理，不需要再弹窗"。
+fn try_self_heal(detail: &str) -> bool {
+    if !is_busy_error(detail) {
+        return false;
+    }
+    if std::env::var_os("BXT_HEALED").is_some() {
+        return false; // 已经重试过一次，这次老实弹窗
+    }
+    let Some(profile) = webview_profile_dir() else {
+        return false;
+    };
+    if !profile.exists() {
+        return false;
+    }
+
+    // 改名而不是删除：万一用户想捞回主题/偏好，还有一份在
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let broken = profile.with_file_name(format!("EBWebView.broken-{stamp}"));
+
+    // 先清掉更早的备份，避免每坏一次就多几十 MB
+    if let Some(parent) = profile.parent() {
+        if let Ok(entries) = std::fs::read_dir(parent) {
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                if name.to_string_lossy().starts_with("EBWebView.broken-") {
+                    let _ = std::fs::remove_dir_all(entry.path());
+                }
+            }
+        }
+    }
+
+    if std::fs::rename(&profile, &broken).is_err() {
+        return false;
+    }
+
+    // 重新拉起自己，带上"已经自愈过"的标记
+    let Ok(exe) = std::env::current_exe() else {
+        return false;
+    };
+    if std::process::Command::new(exe)
+        .env("BXT_HEALED", "1")
+        .spawn()
+        .is_err()
+    {
+        return false;
+    }
+    log::warn!("WebView2 profile 已重置为 {:?}，正在重启", broken);
+    true
+}
+
 /// release 版没有控制台，启动阶段的 panic 完全不可见（表现就是"闪一下就没了"）。
-/// 这里接住所有 panic：写日志 + 弹窗，让失败永远有话说。
+/// 这里接住所有 panic：能自愈的先自愈，否则写日志 + 弹窗。
 fn install_panic_hook() {
     std::panic::set_hook(Box::new(|info| {
         let detail = info.to_string();
+
+        // 常见的 ERROR_BUSY 直接自愈重启，用户无感
+        if try_self_heal(&detail) {
+            std::process::exit(0);
+        }
+
         let log_path = std::env::temp_dir().join("bxt-crash.log");
         let _ = std::fs::write(&log_path, format!("{detail}\n\n{info:?}\n"));
         report_fatal(&format!(

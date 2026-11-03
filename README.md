@@ -103,8 +103,9 @@ Download `BXT_x.y.z_x64-setup.exe` from [Releases](https://github.com/XUSTOR/bxt
 
 ### Multiple windows
 
-BXT is single-instance: launching it again focuses the existing window.
-(The WebView2 user data directory can only be held by one process at a time; a second instance would crash.)
+BXT is single-instance: launching it again brings the existing window to the front. It never opens a second one.
+
+That is deliberate, and it is handled — not a crash waiting to happen. WebView2's user data directory can only be held by one process at a time, so a second independent instance would simply fail to start. BXT takes that lock during startup, which turns a second launch into "focus the window you already have" instead of an error box.
 
 ## Build from source
 
@@ -116,6 +117,8 @@ npx tauri build      # installer lands in src-tauri/target/release/bundle/nsis/
 ```
 
 Run `npm` / `npx` from the repository root; run `cargo` inside `src-tauri/`.
+
+Development builds are the one exception to the single-instance rule above: they skip the guard and use their own WebView2 profile, so you can debug a `tauri dev` build with BXT itself while the installed copy stays open.
 
 Want a no-install portable zip as well (handy for yourself or for debugging)?
 
@@ -158,7 +161,7 @@ cd src-tauri && cargo test --lib      # backend: SSE parsing (cargo test)
 - **No redaction** — terminal output is sent as-is. A deliberate product decision, not an oversight.
 - **No auto-execution, ever** — including "convenience" toggles. If you want an agent, this isn't it.
 - **Windows only** — the PTY goes through ConPTY and secrets through DPAPI.
-- **Single instance** — multi-window is not supported; the WebView2 data directory is exclusive.
+- **Single instance, single window** — the WebView2 data directory is exclusive, so a second launch focuses the running window instead of opening another. Handled, not worked around.
 - **Tests cover pure functions only** — round slicing and SSE parsing. No UI automation.
 
 ## License

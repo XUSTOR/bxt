@@ -3,6 +3,7 @@
 @tailwind utilities;
 
 :root {
+  /* 兜底值：index.html 的预启动脚本会用用户配置覆盖，运行期由 useTheme 接管 */
   --bg-main: #1e1e2e;
   --accent-color: #22d3ee;
 }

@@ -6,7 +6,25 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>BXT</title>
   </head>
-  <body style="margin: 0; background: #1e1e2e">
+  <body style="margin: 0; background: transparent">
+    <script>
+      // 预启动底色：WebView 一解析到这里就把用户上次选的背景色铺上。
+      // 没有下面这段时，body 会露出写死的默认色，启动瞬间先闪一下默认色再变。
+      // 键名/默认值必须和 src/hooks/useTheme.ts 一致。
+      // 读不到就保持 transparent —— 窗口底色由 Rust 从 ui-prefs.json 恢复
+      // （见 src-tauri/src/ui.rs），透上来正好是用户选的色，不会两处打架。
+      try {
+        var saved = localStorage.getItem("bgColor");
+        if (saved) {
+          // --bg-main 提前写好：React 挂载时 #root 就已经是这个色，不会闪一下默认色
+          document.documentElement.style.setProperty("--bg-main", saved);
+          document.documentElement.style.background = saved;
+          document.body.style.background = saved;
+        }
+      } catch (e) {
+        // localStorage 不可用（隐私模式等）：保持透明，用窗口底色
+      }
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

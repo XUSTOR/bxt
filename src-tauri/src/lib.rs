@@ -7,6 +7,8 @@ use serde::Serialize;
 
 mod ai;
 mod secret;
+mod ui;
+mod webview;
 
 struct PtyHandles {
     writer: Box<dyn Write + Send>,
@@ -357,6 +359,24 @@ pub fn run() {
         .setup(|app| {
             app.manage(PtyState(Mutex::new(HashMap::new())));
             app.manage(ai::AiState::load(app.handle()));
+
+            // 窗口创建时 WebView 还没起来、读不到 localStorage，
+            // 这里把上次记住的背景色贴上去：WebView2 的首帧就是它，不会闪默认色。
+            if let Some(window) = app.get_webview_window("main") {
+                ui::apply_saved_bg(app.handle(), &window);
+
+                // 先把颜色贴好再露脸：setup 跑在窗口创建之后，
+                // 若此刻窗口已经可见，用户会先闪一下 tauri.conf.json 里的默认色。
+                if let Err(e) = window.show() {
+                    log::warn!("显示主窗口失败: {e}");
+                }
+
+                // 终端不需要浏览器那套快捷键（F5/Ctrl+R/Ctrl+F…），全部关掉；
+                // 只在前端实现 Ctrl+Shift+R 重新加载界面。debug 版保留，方便开 DevTools。
+                #[cfg(not(debug_assertions))]
+                webview::disable_browser_accelerator_keys(&window);
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -365,6 +385,7 @@ pub fn run() {
             pty_resize,
             pty_kill,
             clipboard_read_text,
+            ui::ui_set_bg_color,
             ai::ai_get_config,
             ai::ai_set_config,
             ai::ai_chat,

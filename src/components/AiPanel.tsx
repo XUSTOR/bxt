@@ -1,10 +1,16 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { TerminalRound } from "../TerminalComponent";
 import { useLanguage } from "../contexts/LanguageContext";
 import { providerLabel } from "../lib/ai";
+import { getAiPanelWidth, setAiPanelWidth } from "../lib/settings";
 import ContextPicker from "./ai/ContextPicker";
 import MessageList from "./ai/MessageList";
 import { useAiChat } from "./ai/useAiChat";
+
+/** 面板宽度的上下限（px）。默认值和原来固定的 w-80 一致 */
+const DEFAULT_WIDTH = 320;
+const MIN_WIDTH = 280;
+const MAX_WIDTH = 720;
 
 interface AiPanelProps {
   isAiOpen: boolean;
@@ -25,20 +31,96 @@ export default function AiPanel({
   const chat = useAiChat({ rounds, isAiOpen });
   const [input, setInput] = useState("");
 
+  // ---- 面板宽度：左边缘拖拽，双击复位，宽度记在 localStorage ----
+  const [width, setWidth] = useState(() => getAiPanelWidth(DEFAULT_WIDTH));
+  const widthRef = useRef(width);
+  const dragging = useRef(false);
+  const dragStartX = useRef(0);
+  const dragStartWidth = useRef(0);
+
+  // 小窗口下别把终端挤没：最多留 380px 给终端
+  const clampWidth = (px: number) => {
+    const maxByWindow = Math.max(MIN_WIDTH, window.innerWidth - 380);
+    return Math.min(Math.max(px, MIN_WIDTH), Math.min(MAX_WIDTH, maxByWindow));
+  };
+
+  // 窗口变窄时重新夹一次，避免面板溢出
+  useEffect(() => {
+    const onResize = () =>
+      setWidth((w) => {
+        const next = clampWidth(w);
+        widthRef.current = next;
+        return next;
+      });
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  const handleDragStart = (e: React.PointerEvent<HTMLDivElement>) => {
+    dragging.current = true;
+    dragStartX.current = e.clientX;
+    dragStartWidth.current = widthRef.current;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    // 拖拽期间禁止选中文本，否则会选到对话内容
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "col-resize";
+  };
+
+  const handleDragMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragging.current) return;
+    // 面板在右侧：鼠标往左移 = 变宽
+    const next = clampWidth(
+      dragStartWidth.current + (dragStartX.current - e.clientX),
+    );
+    widthRef.current = next;
+    setWidth(next);
+  };
+
+  const handleDragEnd = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragging.current) return;
+    dragging.current = false;
+    e.currentTarget.releasePointerCapture(e.pointerId);
+    document.body.style.userSelect = "";
+    document.body.style.cursor = "";
+    setAiPanelWidth(widthRef.current);
+  };
+
+  const resetWidth = () => {
+    const w = clampWidth(DEFAULT_WIDTH);
+    widthRef.current = w;
+    setWidth(w);
+    setAiPanelWidth(w);
+  };
+
   const handleSend = async () => {
     if (await chat.send(input)) setInput("");
   };
 
   return (
     <div
-      className={`w-80 shrink-0 bg-black/50 backdrop-blur-xl border-l flex flex-col h-full transition-transform duration-300 ease-in-out ${
+      className={`shrink-0 bg-black/50 backdrop-blur-xl border-l flex flex-col h-full relative transition-transform duration-300 ease-in-out ${
         isAiOpen ? "translate-x-0" : "translate-x-full hidden"
       }`}
       style={{
+        width: `${width}px`,
         borderColor: `${themeColor}4D`,
         boxShadow: `0 0 20px ${themeColor}26`,
       }}
     >
+      {/* 左边缘拖拽条：拖动改宽度，双击复位 */}
+      {isAiOpen && (
+        <div
+          onPointerDown={handleDragStart}
+          onPointerMove={handleDragMove}
+          onPointerUp={handleDragEnd}
+          onPointerCancel={handleDragEnd}
+          onDoubleClick={resetWidth}
+          title={t("aiResizeHint")}
+          className="absolute top-0 left-0 h-full w-1.5 -translate-x-1/2 cursor-col-resize group z-10"
+        >
+          <div className="h-full w-full bg-transparent group-hover:bg-[var(--accent-color)] transition-colors opacity-40" />
+        </div>
+      )}
       {/* 顶部：标题随配置动态变化（不写死厂商） */}
       <div className="p-4 border-b border-gray-700 flex justify-between items-center shrink-0">
         <h2

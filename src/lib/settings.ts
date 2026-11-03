@@ -18,6 +18,26 @@ export function setHideBanner(value: boolean) {
   }
 }
 
+/** AI 面板宽度（拖拽分隔条时持久化） */
+const AI_PANEL_WIDTH_KEY = "ai_panel_width";
+
+export function getAiPanelWidth(fallback: number): number {
+  try {
+    const raw = Number(localStorage.getItem(AI_PANEL_WIDTH_KEY));
+    return Number.isFinite(raw) && raw > 0 ? raw : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+export function setAiPanelWidth(px: number) {
+  try {
+    localStorage.setItem(AI_PANEL_WIDTH_KEY, String(Math.round(px)));
+  } catch {
+    // 忽略写入失败
+  }
+}
+
 /**
  * 隐私说明的确认标记。
  * 带版本号：隐私边界将来若有实质变化（比如开始收集遥测），把版本升到 v2，

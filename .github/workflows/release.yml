@@ -43,7 +43,26 @@ jobs:
           # 手动触发（workflow_dispatch）时只构建、不发布。
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
           releaseName: "BXT ${{ github.ref_name }}"
-          releaseBody: "See CHANGELOG."
+          releaseBody: |
+            ### Install
+
+            Download `BXT_*_x64-setup.exe` below and double-click — **no administrator rights needed**.
+            It installs per-user into `%LOCALAPPDATA%\BXT` and does not trigger UAC.
+
+            If setup reports `Error writing temporary file`, a security suite blocked extraction
+            (the installer is unsigned). Right-click the file → **Run as administrator**.
+
+            ### What changed
+
+            [CHANGELOG (English)](https://github.com/XUSTOR/bxt/blob/main/CHANGELOG.md) ·
+            [更新日志（中文）](https://github.com/XUSTOR/bxt/blob/main/CHANGELOG.zh-CN.md)
+
+            ### Why it never presses Enter
+
+            BXT hands the AI exact terminal context and then stops. When the answer contains a
+            command it types it at your prompt — bracketed paste, no trailing newline, no
+            auto-submit — and waits. You read it, you edit it, you press Enter.
+            Context can be automated; accountability can't.
           releaseDraft: true
           prerelease: false
           args: --bundles nsis

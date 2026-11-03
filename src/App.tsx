@@ -89,6 +89,22 @@ function AppContent() {
     [tabs, activeTabId],
   );
 
+  // ---- 拦掉 WebView2 的浏览器右键菜单 ----
+  // 设置页、面板、按钮上右键会弹出「重新加载 / 另存为 / 打印 / 检查」那套 —— 那是
+  // 浏览器的菜单，不是桌面应用该有的东西。终端自己有一套（选中复制 / 粘贴），
+  // 它会在自己的监听器里 preventDefault，这里再拦一次没有副作用。
+  //
+  // 输入框放行：那里的系统菜单是「剪切/复制/粘贴」，是真有用的。
+  useEffect(() => {
+    const onContextMenu = (e: MouseEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el?.closest("input, textarea, [contenteditable='true']")) return;
+      e.preventDefault();
+    };
+    document.addEventListener("contextmenu", onContextMenu);
+    return () => document.removeEventListener("contextmenu", onContextMenu);
+  }, []);
+
   // ---- 快捷键分发器（应用级） ----
   // 必须挂在 document 且 capture: true：终端有焦点时也要先被我们拦下，
   // 靠 stopPropagation 把组合键挡在 xterm 之外，字符不会漏进 shell。

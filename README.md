@@ -47,22 +47,18 @@
 
 ## 安装
 
-**方式一：安装包（推荐）**
-
 从 [Releases](https://github.com/xustor/bxt/releases) 下载 `BXT_x.y.z_x64-setup.exe`，双击安装 —— **无需管理员权限**，装进 `%LOCALAPPDATA%\Programs\BXT`，不触发 UAC。
 
-**方式二：便携版（免安装）**
-
-下载 `BXT_x.y.z_portable.zip`，解压后直接双击 `BXT.exe`。不需要安装、不需要权限，适合放在 U 盘或装不上安装包的机器。
-
 **系统要求**：Windows 10 1809+ / Windows 11（WebView2 运行时系统自带）。
+
+**首次运行**可能看到「Windows 已保护你的电脑」或「打开这些文件可能会对你的计算机有害」—— 这是未签名程序的例行提示，点「更多信息 → 仍要运行」或「确定」即可。
 
 ### 安装失败怎么办
 
 | 现象 | 处理 |
 |---|---|
-| 报 `Error writing temporary file` | 安全软件（火绒 / 360 等）拦截了解压。**右键安装程序 → 以管理员身份运行**即可绕过 |
-| 双击没反应 / 装到一半退出 | 先把杀软里的安装包加入信任区，或改用上面的便携版 |
+| 报 `Error writing temporary file` | 安全软件（火绒 / 360 等）拦截了解压。**右键安装程序 → 以管理员身份运行** |
+| 双击没反应 / 装到一半退出 | 先关闭安全软件的防护，或把安装包加入信任区，再重试 |
 | 启动报 `msedgewebview2.exe 应用程序错误` | 修复 WebView2 运行时：设置 → 应用 → Microsoft Edge WebView2 Runtime → 修改 → 修复 |
 
 > ⚠️ **只有安装程序可以右键"以管理员身份运行"。**
@@ -79,13 +75,16 @@ BXT 是单实例的：再次启动不会开出第二个窗口，而是把已有�
 npm install
 npx tauri dev        # 开发，热更新
 npx tauri build      # 打包：安装包在 src-tauri/target/release/bundle/nsis/
-
-# 再出一个便携 zip（解压即用，绕开 NSIS）
-powershell -ExecutionPolicy Bypass -File scripts\pack-portable.ps1
-# 产物：dist-portable/BXT_x.y.z_portable.zip
 ```
 
 > 所有 `npm` / `npx` 命令都在仓库根目录执行；`cargo` 命令在 `src-tauri/` 下执行。
+
+想额外出一个免安装的便携 zip（自用或排障时很方便）：
+
+```bash
+powershell -ExecutionPolicy Bypass -File scripts\pack-portable.ps1
+# 产物：dist-portable/BXT_x.y.z_portable.zip
+```
 
 ## 项目结构
 

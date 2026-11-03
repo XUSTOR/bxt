@@ -52,8 +52,10 @@ export default function GhostPet({ size = 160 }: { size?: number }) {
   const BLINK_SQUASH = 0.84; // 纵向压到 16%，看起来就是一条横杠
   const BLINK_WIDEN = 0.32; // 横向顺带拉宽一点
   const BLINK_FADE_MS = 120; // 睁眼时的缓动时长
-  const CLICK_SRC_1 = "/click1.wav"; // 单击
-  const CLICK_SRC_2 = "/click2.wav"; // 双击之后（含双击本身）
+  const CLICK_SRC_1 = "/click1.wav"; // 单击状态
+  const CLICK_SRC_2 = "/click2.wav"; // 双击状态
+  // 既是"判定双击"的间隔，也是"多久没点击就退回单击状态"
+  const DOUBLE_STATE_MS = 240;
 
   const hostRef = useRef<HTMLDivElement>(null);
   const tiltRef = useRef<SVGGElement>(null);
@@ -83,7 +85,13 @@ export default function GhostPet({ size = 160 }: { size?: number }) {
     // 音频元素懒加载：第一次真的要出声时才创建。
     let audio1: HTMLAudioElement | null = null;
     let audio2: HTMLAudioElement | null = null;
-    let armed = false; // 双击过之后置真：此后一律 click2
+    // 状态机：
+    //   单击状态 --(240ms 内又按下)--> 双击状态
+    //   单击状态 <--(240ms 没有点击)--  双击状态
+    // 单击状态按 → click1；双击状态按 → click2，并给那 240ms 续期。
+    let inDouble = false;
+    let lastPressAt = 0;
+    let idleTimer: number | undefined;
 
     const playSound = (which: 1 | 2) => {
       const el =
@@ -159,25 +167,40 @@ export default function GhostPet({ size = 160 }: { size?: number }) {
 
     // 双击：掐掉已经响起的 click1，补一声 click2，然后闭眼一小会儿。
     // 判定时机交给浏览器（用的是系统双击时间，约 500ms），比我们硬编码的窗口准。
-    const onDoubleClick = () => {
-      if (!armed) {
-        armed = true;
-        fadeOutClick1();
-        playSound(2);
-      }
+    // 进入双击状态（并给 240ms 续期），眼睛同时压成横杠
+    const enterDouble = () => {
+      inDouble = true;
 
-      // 闭眼时长跟双击音效对齐；拿不到 duration 就退回 600ms
-      const ms =
-        Number.isFinite(audio2?.duration) && (audio2?.duration ?? 0) > 0
-          ? Math.min((audio2?.duration ?? 0) * 1000, 1500)
-          : 600;
+      const d = audio2?.duration ?? 0;
+      const ms = Number.isFinite(d) && d > 0 ? Math.min(d * 1000, 1500) : 600;
       closedUntil = performance.now() + Math.max(400, ms);
+
+      if (idleTimer !== undefined) window.clearTimeout(idleTimer);
+      idleTimer = window.setTimeout(() => {
+        idleTimer = undefined;
+        inDouble = false; // 240ms 没动静 → 退回单击状态
+      }, DOUBLE_STATE_MS);
     };
 
     // 按下立刻出声，不拖延：单击必须跟手。
-    // 如果是双击，第二下按下后浏览器会补一个 dblclick，那时再把 click1 换成 click2。
+    // 240ms 内的第二下 = 双击：掐掉 click1、放 click2、进入双击状态。
     const triggerPressSound = () => {
-      playSound(armed ? 2 : 1);
+      const now = performance.now();
+      const fastSecond = now - lastPressAt < DOUBLE_STATE_MS;
+      lastPressAt = now;
+
+      if (inDouble) {
+        playSound(2);
+        enterDouble(); // 续期
+        return;
+      }
+      if (fastSecond) {
+        fadeOutClick1();
+        playSound(2);
+        enterDouble();
+        return;
+      }
+      playSound(1);
     };
 
     const onPointerDown = (e: PointerEvent) => {
@@ -349,14 +372,13 @@ export default function GhostPet({ size = 160 }: { size?: number }) {
     };
 
     host.addEventListener("pointerdown", onPointerDown);
-    host.addEventListener("dblclick", onDoubleClick);
     window.addEventListener("mousemove", onMouseMove);
     raf = requestAnimationFrame(tick);
 
     return () => {
       cancelAnimationFrame(raf);
+      if (idleTimer !== undefined) window.clearTimeout(idleTimer);
       host.removeEventListener("pointerdown", onPointerDown);
-      host.removeEventListener("dblclick", onDoubleClick);
       window.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);

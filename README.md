@@ -47,20 +47,45 @@
 
 ## 安装
 
-从 [Releases](https://github.com/xustor/bxt/releases) 下载 `BXT_x.y.z_x64-setup.exe`，双击即可 —— **per-user 安装，不弹 UAC**，装进 `%LOCALAPPDATA%\Programs\BXT`。
+**方式一：安装包（推荐）**
 
-不想装的话，`app.exe` 是自包含单文件，复制出来直接运行。
+从 [Releases](https://github.com/xustor/bxt/releases) 下载 `BXT_x.y.z_x64-setup.exe`，双击安装 —— **无需管理员权限**，装进 `%LOCALAPPDATA%\Programs\BXT`，不触发 UAC。
 
-**系统要求**：Windows 10 1809+ / Windows 11（WebView2 系统自带）。
+**方式二：便携版（免安装）**
+
+下载 `BXT_x.y.z_portable.zip`，解压后直接双击 `BXT.exe`。不需要安装、不需要权限，适合放在 U 盘或装不上安装包的机器。
+
+**系统要求**：Windows 10 1809+ / Windows 11（WebView2 运行时系统自带）。
+
+### 安装失败怎么办
+
+| 现象 | 处理 |
+|---|---|
+| 报 `Error writing temporary file` | 安全软件（火绒 / 360 等）拦截了解压。**右键安装程序 → 以管理员身份运行**即可绕过 |
+| 双击没反应 / 装到一半退出 | 先把杀软里的安装包加入信任区，或改用上面的便携版 |
+| 启动报 `msedgewebview2.exe 应用程序错误` | 修复 WebView2 运行时：设置 → 应用 → Microsoft Edge WebView2 Runtime → 修改 → 修复 |
+
+> ⚠️ **只有安装程序可以右键"以管理员身份运行"。**
+> 请勿以管理员身份运行 BXT 本体 —— 提权与非提权混用会损坏 WebView2 的用户数据目录，之后普通权限就打不开了。
+
+### 多个窗口
+
+BXT 是单实例的：再次启动不会开出第二个窗口，而是把已有窗口提到前台。
+（WebView2 的用户数据目录同一时刻只能被一个进程占用，双开会直接崩溃。）
 
 ## 从源码构建
 
 ```bash
-# 依赖：Node 20+、Rust 1.90+、Visual Studio Build Tools（C++ 桌面开发）
 npm install
 npx tauri dev        # 开发，热更新
-npx tauri build      # 打包，产物在 src-tauri/target/release/bundle/nsis/
+npx tauri build      # 打包：安装包在 src-tauri/target/release/bundle/nsis/
+
+# 再出一个便携 zip（解压即用，绕开 NSIS）
+powershell -ExecutionPolicy Bypass -File scripts\pack-portable.ps1
+# 产物：dist-portable/BXT_x.y.z_portable.zip
 ```
+
+> 所有 `npm` / `npx` 命令都在仓库根目录执行；`cargo` 命令在 `src-tauri/` 下执行。
 
 ## 项目结构
 
@@ -69,23 +94,34 @@ src/
   App.tsx                 标签页 / 快捷键 / 布局
   TerminalComponent.tsx   xterm 生命周期、PTY 桥接、轮次采集
   components/
-    AiPanel.tsx           AI 对话：流式输出、轮次勾选、插入终端
+    AiPanel.tsx           AI 面板外壳（组合层）
+    ai/                   useAiChat 状态机、上下文选择、消息列表、prompt 纯函数
     CommandPalette.tsx    命令面板
     SettingsModal.tsx     设置（外观 / API / 关于）
+    PrivacyNotice.tsx     首次启动的隐私说明
     Markdown.tsx          手写 Markdown（带"插入终端"按钮）
     GhostPet.tsx          幽灵彩蛋
-  lib/                    AI 客户端、设置、平台判定
+  lib/                    AI 客户端、轮次切片（含单测）、设置、平台判定
 src-tauri/
-  src/lib.rs              PTY 命令（pty_start / write / resize / kill、剪贴板）
-  src/ai.rs               AI 配置与 SSE 流式代理
+  src/lib.rs              PTY 命令、启动失败弹窗、单实例守卫
+  src/ai.rs               AI 配置与 SSE 流式代理（含单测）
   src/secret.rs           API Key 的 DPAPI 加解密
+scripts/pack-portable.ps1 便携版打包
+```
+
+## 测试
+
+```bash
+npm test                              # 前端：轮次切片纯函数（vitest）
+cd src-tauri && cargo test --lib      # 后端：SSE 解析（cargo test）
 ```
 
 ## 已知取舍
 
 - **不做脱敏**：终端输出原样发出。这是刻意的产品决定，不是遗漏。
 - **不做多平台**：PTY 走 ConPTY，API 走 DPAPI，都是 Windows 专有。
-- **没有自动化测试**：目前只有 `tsc` + ESLint 作为闸门。
+- **单实例**：不允许多开 —— WebView2 的用户数据目录同一时刻只能被一个进程占用。
+- **测试只覆盖纯函数**：轮次切片和 SSE 解析。UI 层没有自动化测试。
 
 ## 许可证
 

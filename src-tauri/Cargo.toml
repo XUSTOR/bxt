@@ -24,6 +24,8 @@ log = "0.4"
 base64 = "0.23"
 tauri = { version = "2.12.5", features = [] }
 tauri-plugin-log = "2"
+# 单实例：避免第二个进程抢同一个 WebView2 profile（会直接崩溃）
+tauri-plugin-single-instance = "2"
 encoding_rs = "0.8.42"
 portable-pty = "0.9.0"
 arboard = "3"
@@ -34,9 +36,11 @@ reqwest = { version = "0.13", default-features = false, features = [
     "system-proxy",
 ] }
 
-# API Key 的本地加密只用 Windows 的 DPAPI
+# API Key 的本地加密只用 Windows 的 DPAPI；
+# MessageBoxW 用于启动失败时弹窗（release 无控制台，否则用户只看到闪退）
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Security_Cryptography",
+    "Win32_UI_WindowsAndMessaging",
 ] }

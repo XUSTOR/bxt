@@ -120,9 +120,77 @@ fn clipboard_read_text() -> Result<String, String> {
     clipboard.get_text().map_err(|e| e.to_string())
 }
 
+/// release 版没有控制台，panic 的信息用户完全看不到（表现就是"闪一下就没了"）。
+/// 这里把启动错误写进日志并弹窗，避免无声退出。
+#[cfg(windows)]
+fn report_fatal(message: &str) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
+
+    let caption: Vec<u16> = "BXT".encode_utf16().chain(std::iter::once(0)).collect();
+    let text: Vec<u16> = message.encode_utf16().chain(std::iter::once(0)).collect();
+    unsafe {
+        MessageBoxW(
+            std::ptr::null_mut(),
+            text.as_ptr(),
+            caption.as_ptr(),
+            MB_OK | MB_ICONERROR,
+        );
+    }
+}
+
+#[cfg(not(windows))]
+fn report_fatal(message: &str) {
+    eprintln!("{message}");
+}
+
+/// 把已知的启动失败翻译成用户能照着做的步骤。
+fn friendly_panic(detail: &str) -> String {
+    // 0x800700AA = ERROR_BUSY：WebView2 数据目录异常/被占用。
+    // 最常见的原因是提权运行过，profile 里混进了非提权上下文写不动的文件。
+    if detail.contains("0x800700AA") || detail.contains("ERROR_BUSY") {
+        "BXT 无法启动：WebView2 数据目录异常。\n\n\
+请依次尝试：\n\
+1) 关闭所有 BXT 窗口，并在任务管理器里结束所有 msedgewebview2.exe\n\
+2) 若仍失败，关闭程序后把下面这个目录改名（下次启动会自动重建）：\n\
+   %LOCALAPPDATA%\\com.xustor.aiterminal.v1\\EBWebView\n\
+3) 不要以管理员身份运行 —— 提权与非提权混用会损坏该目录\n\n\
+注意：改名会重置主题、语言等界面偏好（API Key 不受影响）。"
+            .to_string()
+    } else {
+        format!("BXT 崩溃：\n\n{detail}")
+    }
+}
+
+/// release 版没有控制台，启动阶段的 panic 完全不可见（表现就是"闪一下就没了"）。
+/// 这里接住所有 panic：写日志 + 弹窗，让失败永远有话说。
+fn install_panic_hook() {
+    std::panic::set_hook(Box::new(|info| {
+        let detail = info.to_string();
+        let log_path = std::env::temp_dir().join("bxt-crash.log");
+        let _ = std::fs::write(&log_path, format!("{detail}\n\n{info:?}\n"));
+        report_fatal(&format!(
+            "{}\n\n详细信息已写入：\n{}",
+            friendly_panic(&detail),
+            log_path.display()
+        ));
+    }));
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    install_panic_hook();
+
+    let result = tauri::Builder::default()
+        // 必须最先注册：WebView2 的 profile 是单实例独占的，
+        // 第二个进程去建 webview 会直接失败（ERROR_BUSY / 浏览器进程崩溃）。
+        // 这里把"第二次启动"变成"聚焦已有窗口"。
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .setup(|app| {
             app.manage(PtyState(Mutex::new(HashMap::new())));
             app.manage(ai::AiState::load(app.handle()));
@@ -140,6 +208,18 @@ pub fn run() {
             ai::ai_cancel,
             ai::ai_test
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .run(tauri::generate_context!());
+
+    if let Err(err) = result {
+        // 日志放在 %TEMP%，那里一定可写；弹窗里给用户路径
+        let log_path = std::env::temp_dir().join("bxt-startup-error.log");
+        let _ = std::fs::write(
+            &log_path,
+            format!("BXT 启动失败\n\n{err}\n\n{err:?}\n"),
+        );
+        report_fatal(&format!(
+            "BXT 启动失败：\n\n{err}\n\n详细信息已写入：\n{}",
+            log_path.display()
+        ));
+    }
 }

@@ -10,7 +10,7 @@ import {
 } from "../../lib/ai";
 import { isTauri } from "../../lib/env";
 import { useLanguage } from "../../contexts/LanguageContext";
-import { SYSTEM_PROMPT, buildContext } from "./prompt";
+import { buildSystemPrompt, contextHeader, buildContext } from "./prompt";
 
 export interface ChatMessage {
   role: "user" | "assistant";
@@ -37,7 +37,7 @@ export function useAiChat({
   rounds: TerminalRound[];
   isAiOpen: boolean;
 }) {
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
 
   const [config, setConfig] = useState<AiConfigPublic | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -171,9 +171,9 @@ export function useAiChat({
       .map((m) => ({ role: m.role, content: m.content }));
 
     const payload: AiMessage[] = [
-      { role: "system", content: SYSTEM_PROMPT },
+      { role: "system", content: buildSystemPrompt(lang) },
       ...(context
-        ? [{ role: "system" as const, content: `终端里最近几轮命令与输出：\n\n${context}` }]
+        ? [{ role: "system" as const, content: `${contextHeader(lang)}\n\n${context}` }]
         : []),
       ...history,
       { role: "user", content },
